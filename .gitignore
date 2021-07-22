@@ -3,6 +3,11 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Data
+data/
+*.gz
+*.zip
+
 # C extensions
 *.so
 
@@ -127,3 +132,8 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+.vscode/
+
+# OS X filesystem
+.DS_Store

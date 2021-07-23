@@ -1,6 +1,6 @@
 import pathlib
 
-from urban_sound.dataloader.load_data import BirdDataset, Urban8KDataset
+from urban_sound.datasets.load_data import BirdDataset, Urban8KDataset
 
 
 def get_dataset_path(key):

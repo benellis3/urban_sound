@@ -17,6 +17,37 @@ def _maybe_make_path(path: Union[Path, str]) -> Path:
     return path
 
 
+class SortedNumbersDataset(Dataset):
+    """A dataset consisting of different length sequences of sorted integers"""
+
+    def __init__(self, N: int, max_seq_len: int):
+        """
+
+        Args:
+            N (int): number of points in the dataset to generate
+            max_seq_len (int): maximum length of the sequence
+        """
+        self.max_seq_len = max_seq_len
+        self.N = N
+        self.data = self._create_data()
+
+    def _create_data(self):
+        start_numbers = th.randint(self.N, size=(self.N,))
+        seq_len = th.randint(self.max_seq_len, size=(self.N,))
+        out = th.zeros(self.N, self.max_seq_len)
+        for k in range(self.N):
+            out[k, : seq_len[k]] = th.arange(
+                start_numbers[k], start_numbers[k] + seq_len[k]
+            )
+        return out
+
+    def __len__(self):
+        return self.N
+
+    def __getitem__(self, index) -> Tuple[TensorType, int]:
+        return self.data[index]
+
+
 class AudioDataset(ABC):
     """
     Expects there to be one metadata object for the whole dataset, and there to be

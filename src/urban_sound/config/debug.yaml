@@ -1,0 +1,13 @@
+z_size: 32
+c_size: 16
+encoder: "cnn"
+ar_encoder: "gru"
+look_ahead: 12
+batch_size: 8
+epochs: 10
+update_interval: 50
+shuffle: true
+optim:
+  optim.name: "Adam"
+  optim.lr: 0.0001
+negative_sample_selector: "random"

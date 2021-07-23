@@ -1,7 +1,7 @@
-from typing import NamedTuple, Tuple
+from typing import Dict, NamedTuple, Tuple
 from functools import reduce
+from omegaconf.dictconfig import DictConfig
 import torch as th
-from torch.functional import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 from torchtyping import TensorType, patch_typeguard
@@ -97,7 +97,7 @@ def get_arencoder(key):
 
 
 class RandomNegativeSampleSelector:
-    def __init__(self, config):
+    def __init__(self, config: DictConfig):
         self.args = config
         self.N = config.N
         self.look_ahead = config.look_ahead
@@ -128,7 +128,7 @@ Scores = NamedTuple("Scores", [("pos", TensorType), ("neg", TensorType)])
 
 
 class CPC(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config: DictConfig):
         super().__init__()
         self.config = config
         self.device = config.device
@@ -166,7 +166,7 @@ class CPC(nn.Module):
             T is the length of the sequence.
 
         Returns:
-            f_k (torch.Tensor): The score of all the z_{t+k} with c_t.
+            log_f_k (torch.Tensor): The logarithm of the score of all the z_{t+k} with c_t.
         """
         seq_len = batch.size(-1)
         t = th.randint(
@@ -198,10 +198,11 @@ class CPC(nn.Module):
             transformed_c_t: TensorType["batch", "z_size"] = self.w_ks[k](c_t)
             # expand the dims to be the same size as neg
             transformed_c_t = transformed_c_t[:, None, :].repeat(1, self.N - 1, 1)
-            neg_scores[:, k, :] = th.exp(
-                th.sum(transformed_c_t[:, : self.N - 1, :] * neg[:, k, :, :], dim=-1)
+            neg_scores[:, k, :] = th.sum(
+                transformed_c_t[:, : self.N - 1, :] * neg[:, k, :, :], dim=-1
             )
-            pos_scores[:, k, :] = th.exp(
-                th.sum(transformed_c_t[:, 0, :] * pos[:, k, :], dim=-1)
+
+            pos_scores[:, k, :] = th.sum(
+                transformed_c_t[:, 0, :] * pos[:, k, :], dim=-1
             ).unsqueeze(-1)
         return Scores(pos=pos_scores, neg=neg_scores)

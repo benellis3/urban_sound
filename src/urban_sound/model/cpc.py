@@ -126,6 +126,13 @@ def get_negative_selector(key):
     return NEGATIVE_SELECTORS[key]
 
 
+LOOK_AHEAD_LAYERS = {"linear": nn.Linear}
+
+
+def get_look_ahead_layers(key):
+    return LOOK_AHEAD_LAYERS[key]
+
+
 Scores = NamedTuple("Scores", [("pos", TensorType), ("neg", TensorType)])
 
 
@@ -145,7 +152,9 @@ class CPC(nn.Module):
         self.look_ahead = config.look_ahead
         self.w_ks = nn.ModuleList(
             [
-                nn.Linear(self.c_size, self.z_size, bias=False)
+                get_look_ahead_layers(config.look_ahead_layer)(
+                    self.c_size, self.z_size, bias=False
+                )
                 for _ in range(self.look_ahead)
             ]
         )
@@ -190,7 +199,7 @@ class CPC(nn.Module):
         # need to multiply by the downsample_factor because t has been selected
         # in the z-time space. In general have to map between z-time and batch-time
         # (i.e. invert encoder's shape transformation).
-        z_t: TensorType["batch", "z_size", "t + look_ahead + 1"] = self.encoder(
+        z_t: TensorType["batch", "z_size", "t + look_ahead"] = self.encoder(
             batch[:, :, : (t + self.look_ahead) * self.encoder.downsample_factor]
         )
 

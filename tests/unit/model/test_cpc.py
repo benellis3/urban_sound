@@ -13,6 +13,8 @@ from urban_sound.model.cpc import (
 )
 from unittest.mock import Mock, patch
 
+MUT = "urban_sound.model.cpc"
+
 
 @pytest.fixture
 def normal_data():
@@ -67,7 +69,7 @@ def test_negative_sample_selector():
     negative_sample_selector = RandomNegativeSampleSelector(config)
     idx_0 = th.zeros((batch_size, look_ahead, N - 1), dtype=int)
     idx_1 = th.zeros((batch_size, look_ahead, N - 1), dtype=int)
-    with patch("urban_sound.model.cpc.th.randint", side_effect=[idx_0, idx_1]):
+    with patch(f"{MUT}.th.randint", side_effect=[idx_0, idx_1]):
         out = negative_sample_selector(data)
         assert out.shape == (batch_size, look_ahead, N - 1, z_size)
         vals = th.tensor([i * T for i in range(z_size)])
@@ -101,13 +103,12 @@ def test_cpc_shape(normal_data):
         N=N,
         look_ahead=look_ahead,
         negative_sample_selector="random",
+        look_ahead_layer="linear",
     )
 
     # patch the encoder and decoder
-    with patch(
-        "urban_sound.model.cpc.get_encoder", return_value=Mock(return_value=encoder)
-    ), patch(
-        "urban_sound.model.cpc.get_arencoder",
+    with patch(f"{MUT}.get_encoder", return_value=Mock(return_value=encoder)), patch(
+        f"{MUT}.get_arencoder",
         return_value=Mock(return_value=arencoder),
     ):
         cpc = CPC(config)
@@ -116,3 +117,66 @@ def test_cpc_shape(normal_data):
         assert hasattr(out, "neg")
         assert out.pos.shape == (batch_size, look_ahead, 1)
         assert out.neg.shape == (batch_size, look_ahead, N - 1)
+
+
+@pytest.mark.parametrize(
+    ("z_t", "c_t", "negative_samples", "pos", "neg"),
+    [
+        (
+            th.Tensor([[[20.0, 21.0]], [[22.0, 23.0]], [[24.0, 25.0]]]),
+            th.Tensor([[[-1.0]], [[-3.0]], [[-5.0]]]),
+            th.Tensor([[[[22.0]]], [[[24.0]]], [[[20.0]]]]),
+            th.Tensor([[[-21.0]], [[-69.0]], [[-125.0]]]),
+            th.Tensor([[[-22.0]], [[-72.0]], [[-100.0]]]),
+        ),
+        (
+            th.Tensor(
+                [
+                    [[13.0, 14.0], [15.0, 16.0]],
+                    [[17.0, 18.0], [19.0, 20.0]],
+                    [[21.0, 22.0], [23.0, 24.0]],
+                ]
+            ),
+            th.Tensor([[[-1.0, -1.0]], [[-2.0, -2.0]], [[-3.0, -3.0]]]),
+            th.Tensor([[[[19.0, 20.0]]], [[[23.0, 24.0]]], [[[13.0, 14.0]]]]),
+            th.Tensor([[[-30.0]], [[-76.0]], [[-138.0]]]),
+            th.Tensor([[[-39.0]], [[-94.0]], [[-81.0]]]),
+        ),
+    ],
+)
+def test_cpc(z_t, c_t, negative_samples, pos, neg):
+    """Test which mocks the encoder, the context encoder the negative sample selector
+    and checks that the score is calculated correctly."""
+    z_size = z_t.size(1)
+    c_size = c_t.size(1)
+    N = 2
+    downsample_factor = 2
+    look_ahead = 1
+    batch = th.Tensor(
+        [[[1.0, 2.0, 3.0, 4.0]], [[5.0, 6.0, 7.0, 8.0]], [[9.0, 10.0, 11.0, 12.0]]]
+    )
+    encoder = Mock(side_effect=lambda _: z_t, downsample_factor=downsample_factor)
+    ar_encoder = Mock(side_effect=lambda _: (c_t, None))
+    look_ahead_layer = Mock(side_effect=lambda x: x)
+    negative_selector = Mock(side_effect=lambda _: negative_samples)
+    config = Mock(
+        device="cpu",
+        z_size=z_size,
+        c_size=c_size,
+        N=N,
+        look_ahead=look_ahead,
+        negative_sample_selector="random",
+        look_ahead_layer="linear",
+    )
+    with patch(f"{MUT}.get_encoder", return_value=Mock(return_value=encoder)), patch(
+        f"{MUT}.get_arencoder", return_value=Mock(return_value=ar_encoder)
+    ), patch(
+        f"{MUT}.get_negative_selector",
+        return_value=Mock(return_value=negative_selector),
+    ), patch(
+        f"{MUT}.nn.ModuleList", return_value=[look_ahead_layer]
+    ):
+        cpc = CPC(config)
+        out = cpc(batch)
+        assert th.allclose(out.pos, pos)
+        assert th.allclose(out.neg, neg)

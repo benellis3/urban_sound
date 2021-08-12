@@ -1,14 +1,20 @@
 from abc import ABC, abstractmethod
-from collections import defaultdict
 from pathlib import Path
-from typing import Tuple, Union
+from typing import Tuple, Union, Any
+from functools import cached_property
 
 from torch.utils.data import Dataset
 from pandas import read_csv, concat
 from torchaudio import info, load
-from torchtyping import TensorType
+from torchaudio.sox_effects import apply_effects_tensor
+from torchtyping import TensorType, patch_typeguard
 import torch as th
 import numpy as np
+from typeguard import typechecked
+
+from urban_sound.datasets.line_sweep import remove_overlap
+
+patch_typeguard()
 
 
 def _maybe_make_path(path: Union[Path, str]) -> Path:
@@ -17,35 +23,67 @@ def _maybe_make_path(path: Union[Path, str]) -> Path:
     return path
 
 
-class SortedNumbersDataset(Dataset):
+def _get_root_dir():
+    return Path(__file__).parent.parent.parent.parent
+
+
+class NumbersDataset(ABC):
+    def __len__(self) -> int:
+        return self.N
+
+    @typechecked
+    def __getitem__(
+        self, index: int
+    ) -> Tuple[TensorType, Union[TensorType, np.integer]]:
+        return self.data[index], self.labels[index]
+
+
+class ClusteredDataset(NumbersDataset, Dataset):
+    def __init__(self, config):
+        self.N = config.dataset.N
+        self.max_seq_len = config.dataset.max_seq_len
+        self.noise = config.dataset.noise
+        self.data, self.labels = self._create_data()
+        self.is_labelled = config.dataset.is_labelled
+
+    def _create_data(self):
+        half_N = int(self.N / 2)
+        ones = th.ones((half_N, 1, self.max_seq_len))
+        one_labels = th.ones((half_N,))
+        zeros = th.zeros((self.N - half_N, 1, self.max_seq_len))
+        zero_labels = th.zeros((self.N - half_N))
+        ones += th.normal(mean=0.0, std=self.noise, size=ones.shape)
+        zeros += th.normal(mean=0.0, std=self.noise, size=zeros.shape)
+        return (th.cat([ones, zeros]), th.cat([one_labels, zero_labels]))
+
+
+class SortedNumbersDataset(NumbersDataset, Dataset):
     """A dataset consisting of different length sequences of sorted integers"""
 
-    def __init__(self, N: int, max_seq_len: int):
+    def __init__(self, config):
         """
 
         Args:
             N (int): number of points in the dataset to generate
             max_seq_len (int): maximum length of the sequence
         """
-        self.max_seq_len = max_seq_len
-        self.N = N
+        self.max_seq_len = config.dataset.max_seq_len
+        self.N = config.dataset.N
         self.data = self._create_data()
+        self.labels = th.zeros((self.N,))
+        self.is_labelled = config.dataset.is_labelled
 
     def _create_data(self):
         start_numbers = th.randint(self.N, size=(self.N,))
         seq_len = th.randint(self.max_seq_len, size=(self.N,))
-        out = th.zeros(self.N, self.max_seq_len)
+        out = th.zeros(self.N, 1, self.max_seq_len)
         for k in range(self.N):
-            out[k, : seq_len[k]] = th.arange(
+            # need to unsqueeze because the expected data format is
+            # (channels, length) and we need 1 channel
+            out[k, :, : seq_len[k]] = th.arange(
                 start_numbers[k], start_numbers[k] + seq_len[k]
-            )
+            ).unsqueeze(0)
         return out
-
-    def __len__(self):
-        return self.N
-
-    def __getitem__(self, index) -> Tuple[TensorType, int]:
-        return self.data[index]
 
 
 class AudioDataset(ABC):
@@ -62,13 +100,37 @@ class AudioDataset(ABC):
         """
         pass
 
-    def _get_metadata_item(self, index, column):
+    def _get_metadata_item(self, index: int, column: int):
         return self.metadata.iloc[index, self.metadata.columns.get_loc(column)]
 
     def __len__(self):
         return len(self.metadata)
 
-    def __getitem__(self, index):
+    @cached_property
+    def max_seq_length(self):
+        length_seconds = (self.metadata["end"] - self.metadata["start"]).max()
+        sample_rate = self.sample_rate
+        length_samples = int(np.ceil(length_seconds * sample_rate))
+        return length_samples
+
+    def pad_to_max_length(self, audio_tensor, sample_rate):
+        padding = self.max_seq_length - audio_tensor.size(1)
+        effects = [
+            ["pad", "0", f"{padding}s"],
+            ["channels", "1"],
+        ]
+        out, _ = apply_effects_tensor(
+            audio_tensor, sample_rate, effects, channels_first=True
+        )
+        return out
+
+    def resample(self, audio, sample_rate):
+        effects = [["rate", f"{self.sample_rate}"]]
+        out, _ = apply_effects_tensor(audio, sample_rate, effects, channels_first=True)
+        return out
+
+    @typechecked
+    def __getitem__(self, index: int) -> Tuple[Any, np.integer]:
         # get the info of the audio
         audio_path = self._get_audio_path(index)
         audio_metadata = info(audio_path)
@@ -79,11 +141,13 @@ class AudioDataset(ABC):
             np.ceil(audio_metadata.sample_rate * self._get_metadata_item(index, "end"))
         )
         # load only the slice between start and end
-        audio = load(
+        audio, sample_rate = load(
             filepath=audio_path,
             frame_offset=start_frame,
             num_frames=(end_frame - start_frame + 1),
         )
+        audio = self.resample(audio, sample_rate)
+        audio = self.pad_to_max_length(audio, sample_rate)
         if self.transform:
             audio = self.transform(audio)
         label = self._get_metadata_item(index, "classID")
@@ -98,11 +162,28 @@ class BirdDataset(AudioDataset, Dataset):
     Flattens all the text files into one metadata object.
     """
 
-    def __init__(self, metadata_dir, audio_dir, transform=None, label_transform=None):
-        self.audio_dir = _maybe_make_path(audio_dir)
-        self.metadata = self._construct_metadata(_maybe_make_path(metadata_dir))
+    def __init__(self, config, transform=None, label_transform=None):
+        root_dir = _get_root_dir()
+        self.audio_dir = _maybe_make_path(root_dir / config.dataset.audio_dir)
+        self.metadata = self._construct_metadata(
+            _maybe_make_path(root_dir / config.dataset.metadata_dir)
+        )
         self.transform = transform
         self.label_transform = label_transform
+        self.is_labelled = config.dataset.is_labelled
+        self.sample_rate = config.dataset.sample_rate
+
+    def _clean_polyphony(self) -> None:
+        """Remove all instances of polyphony (multiple sounds co-occurring) from the
+        dataset
+        """
+        for file_name in self.metadata["file_name"].unique():
+            metadata = self.metadata[self.metadata["file_name"] == file_name]
+            starts = metadata["start"].values
+            ends = metadata["end"].values
+            indices = metadata.index
+            indices_to_delete = remove_overlap(indices, starts, ends)
+            self.metadata.drop(indices_to_delete, inplace=True)
 
     def _get_audio_path(self, index):
         """Function to go from a metadata file path to the audio recording path"""
@@ -132,6 +213,8 @@ class BirdDataset(AudioDataset, Dataset):
 
         for metadata_file in metadata_dir.rglob("*.txt"):
             metadata = read_csv(metadata_file, sep="\s+")
+            if metadata.empty:
+                continue
             # add column for file name
             metadata["file_name"] = metadata_file.absolute()
             # rename the columns to the expected format
@@ -155,12 +238,15 @@ class Urban8KDataset(AudioDataset, Dataset):
 
     # This ignores the fold-structure of the dataset because we will be doing
     # unsupervised learning with it and hence cross-validation doesn't necessarily make sense.
-    def __init__(self, metadata_file, audio_dir, transform=None, label_transform=None):
-        self.metadata = read_csv(metadata_file)
-        self.dir = Path(audio_dir)
+    def __init__(self, config, transform=None, label_transform=None):
+        root_dir = _get_root_dir()
+        self.metadata = read_csv(root_dir / config.dataset.metadata_file)
+        self.dir = Path(root_dir / config.dataset.audio_dir)
         self.transform = transform
         self.label_transform = label_transform
+        self.is_labelled = config.dataset.is_labelled
+        self.sample_rate = config.dataset.sample_rate
 
-    def _get_audio_path(self, index: int):
+    def _get_audio_path(self, index: int) -> Path:
         fold = f"fold{self._get_metadata_item(index, 'fold')}"
         return self.dir / fold / self._get_metadata_item(index, "slice_file_name")

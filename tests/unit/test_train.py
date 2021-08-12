@@ -1,7 +1,7 @@
 import torch as th
 from unittest.mock import Mock, patch
 
-from urban_sound.train import compute_cpc_loss, train, _compute_accuracy
+from urban_sound.train import compute_cpc_loss, _compute_accuracy, Runner
 from math import log, exp, isclose
 
 RTOL = 1e-05
@@ -33,7 +33,8 @@ def test_train():
     config = Mock(log_output=False)
     # want to verify call order among the model, the optimiser and the loss
     with patch("urban_sound.train.compute_cpc_loss", return_value=loss):
-        train(model, [(Mock(), Mock())], optimiser, config)
+        runner = Runner(model, [(Mock(), Mock())], optimiser, config)
+        runner.train()
         model.assert_called_once()
         optimiser.zero_grad.assert_called_once()
         loss.backward.assert_called_once()

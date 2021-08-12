@@ -1,13 +1,21 @@
+device: ???
 z_size: 32
 c_size: 16
 encoder: "cnn"
-ar_encoder: "gru"
+arencoder: "gru"
 look_ahead: 12
 batch_size: 8
-epochs: 10
+epochs: 100
 update_interval: 50
+tsne_interval: 10000
+log_output: true
+N: 10
 shuffle: true
+tsne:
+  perplexity: 30
+  n_iter: 50000
+  learning_rate: 10
 optim:
-  optim.name: "Adam"
-  optim.lr: 0.0001
+  name: "Adam"
+  lr: 0.0001
 negative_sample_selector: "random"

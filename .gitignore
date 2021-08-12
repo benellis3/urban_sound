@@ -8,6 +8,9 @@ data/
 *.gz
 *.zip
 
+# hydra
+.hydra/
+outputs/
 # C extensions
 *.so
 

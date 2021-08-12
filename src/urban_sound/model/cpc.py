@@ -7,8 +7,10 @@ import torch.nn.functional as F
 from torchtyping import TensorType, patch_typeguard
 from typeguard import typechecked
 import operator
+import logging
 
 patch_typeguard()
+LOG = logging.getLogger(__name__)
 
 
 class CNNEncoder(nn.Module):
@@ -134,7 +136,9 @@ class CPC(nn.Module):
         self.device = config.device
         self.z_size = config.z_size
         self.c_size = config.c_size
-        self.encoder = get_encoder(config.encoder)(self.z_size, device=self.device)
+        self.encoder = get_encoder(config.encoder)(
+            self.z_size, config.dataset.channels, device=self.device
+        )
         self.auto_regressive_encoder = get_arencoder(config.arencoder)(
             self.z_size, self.c_size, device=self.device
         )
@@ -149,6 +153,14 @@ class CPC(nn.Module):
         self.negative_sample_selector = get_negative_selector(
             config.negative_sample_selector
         )(config)
+
+    def generate_embeddings(
+        self, batch: TensorType["batch", "channels", "time"]
+    ) -> TensorType["batch", "c_size"]:
+        z_t = self.encoder(batch)
+        c_t, _ = self.auto_regressive_encoder(z_t)
+        # TODO is this the best choice for all datasets?
+        return th.mean(c_t, dim=1)
 
     @typechecked
     def forward(
@@ -169,21 +181,21 @@ class CPC(nn.Module):
             log_f_k (torch.Tensor): The logarithm of the score of all the z_{t+k} with c_t.
         """
         seq_len = batch.size(-1)
+        # t represents the first timestamp in z-space that we do NOT use for the context.
         t = th.randint(
-            high=int(seq_len / self.encoder.downsample_factor) - self.look_ahead,
+            low=1,
+            high=int(seq_len / self.encoder.downsample_factor) - self.look_ahead + 1,
             size=(1,),
         )
         # need to multiply by the downsample_factor because t has been selected
         # in the z-time space. In general have to map between z-time and batch-time
         # (i.e. invert encoder's shape transformation).
-        z_t: TensorType["batch", "t + look_ahead + 1", "z_size"] = self.encoder(
-            batch[:, :, : (t + self.look_ahead + 1) * self.encoder.downsample_factor]
+        z_t: TensorType["batch", "z_size", "t + look_ahead + 1"] = self.encoder(
+            batch[:, :, : (t + self.look_ahead) * self.encoder.downsample_factor]
         )
 
         # pos are the examples that we are trying to predict
-        pos: TensorType["batch", "look_ahead", "z_size"] = z_t[:, :, t + 1 :].transpose(
-            1, 2
-        )
+        pos: TensorType["batch", "look_ahead", "z_size"] = z_t[:, :, t:].transpose(1, 2)
         # randomly (or otherwise) drawn samples from the batch.
         neg: TensorType[
             "batch", "look_ahead", "N-1", "z_size"

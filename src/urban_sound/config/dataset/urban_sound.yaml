@@ -1,0 +1,6 @@
+audio_dir: "data/UrbanSound8K/audio"
+metadata_file: "data/UrbanSound8K/metadata/UrbanSound8K.csv"
+name: "urban_sound"
+channels: ???
+is_labelled: True
+sample_rate: 16000

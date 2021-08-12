@@ -1,0 +1,5 @@
+name: "clusters"
+N: 100
+max_seq_len: 4096
+noise: 0.1
+channels: ???

@@ -3,6 +3,7 @@ z_size: 32
 c_size: 16
 encoder: "cnn"
 arencoder: "gru"
+look_ahead_layer: "linear"
 look_ahead: 12
 batch_size: 8
 epochs: 100

@@ -1,6 +1,6 @@
 from typing import Optional
 from torch.utils.tensorboard import SummaryWriter
-from functools import cache
+from functools import lru_cache
 from torchtyping import TensorType
 from sklearn.manifold import TSNE
 from omegaconf import DictConfig
@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 
 
-@cache
+@lru_cache(maxsize=1)
 def get_summary_writer():
     return SummaryWriter()
 

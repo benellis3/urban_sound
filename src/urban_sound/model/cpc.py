@@ -39,7 +39,7 @@ class CNNEncoder(nn.Module):
                     stride=self.params["stride"][i],
                     padding=self.params["padding"][i],
                     bias=False,
-                )
+                ).to(self.device)
             )
             self.module_list.append(nn.BatchNorm1d(self.size))
 
@@ -72,7 +72,7 @@ class AutoRegressiveEncoder(nn.Module):
         self.size = size
         self.input_size = input_size
         self.device = device
-        self.network = nn.GRU(input_size, size, batch_first=True)
+        self.network = nn.GRU(input_size, size, batch_first=True).to(self.device)
 
     @typechecked
     def forward(
@@ -154,7 +154,7 @@ class CPC(nn.Module):
             [
                 get_look_ahead_layers(config.look_ahead_layer)(
                     self.c_size, self.z_size, bias=False
-                )
+                ).to(self.device)
                 for _ in range(self.look_ahead)
             ]
         )

@@ -1,5 +1,5 @@
 from omegaconf.dictconfig import DictConfig
-from torch._C import TensorType
+from hydra.utils import to_absolute_path
 from torch.utils.tensorboard.writer import SummaryWriter
 from urban_sound.logging.log import get_summary_writer, log_tsne
 from urban_sound.model.cpc import CPC, Scores
@@ -10,6 +10,8 @@ import torch.nn.functional as F
 from tqdm import tqdm
 from torchtyping import TensorType
 import logging
+import os
+from pathlib import Path
 
 LOG = logging.getLogger(__name__)
 
@@ -68,6 +70,7 @@ class Runner:
                     "accuracy/train", accuracy, global_step=self.t
                 )
             if self.config.log_output and self.t % self.config.tsne_interval == 0:
+                th.save(self.model.state_dict(), Path(os.getcwd()) / f"model_{self.t}")
                 embeddings, all_labels = self._generate_tsne_embeddings()
                 if self.dataloader.dataset.is_labelled:
                     log_tsne(embeddings, self.config, self.t, labels=all_labels)
@@ -77,15 +80,14 @@ class Runner:
 
     def _generate_tsne_embeddings(self) -> TensorType["N", "z_size"]:
         self.model.eval()
+        embeddings = []
+        labels = []
         with th.no_grad():
-            # sample from the dataloader
-            dataloader = DataLoader(
-                dataset=self.dataloader.dataset,
-                batch_size=len(self.dataloader.dataset),
-            )
-            whole_dataset = [d[0] for d in dataloader]
-            whole_labels = [d[1] for d in dataloader]
+            for (batch, label) in tqdm(self.dataloader):
+                embedding = self.model.generate_embeddings(batch)
+                embeddings.append(embedding)
+                labels.append(label)
             return (
-                self.model.generate_embeddings(whole_dataset[0]),
-                whole_labels[0].unsqueeze(1).numpy(),
+                th.cat(embeddings).cpu().numpy(),
+                th.cat(labels).unsqueeze(1).cpu().numpy(),
             )

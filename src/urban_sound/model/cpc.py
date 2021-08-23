@@ -41,7 +41,7 @@ class CNNEncoder(nn.Module):
                     bias=False,
                 ).to(self.device)
             )
-            self.module_list.append(nn.BatchNorm1d(self.size))
+            self.module_list.append(nn.BatchNorm1d(self.size).to(self.device))
 
     @typechecked
     def forward(
@@ -106,17 +106,16 @@ class RandomNegativeSampleSelector:
 
     @typechecked
     def __call__(
-        self,
-        batch: TensorType["batch", "z_size", "T"],
+        self, batch: TensorType["batch", "z_size", "T"], seq_lens
     ) -> TensorType["batch", "look_ahead", "N-1", "z_size"]:
-        # generate random integers
+        # generate random integers.
         idx_0 = th.randint(
             batch.size(0), size=(batch.size(0), self.look_ahead, self.N - 1)
         )
-        idx_1 = th.randint(
-            batch.size(2), size=(batch.size(0), self.look_ahead, self.N - 1)
-        )
-        return batch[idx_0, :, idx_1]
+        idx_1 = []
+        for i in range(batch.size(0)):
+            idx_1.append(th.randint(seq_lens[i], size=(self.look_ahead, self.N - 1)))
+        return batch[idx_0, :, th.stack(idx_1)]
 
 
 NEGATIVE_SELECTORS = {"random": RandomNegativeSampleSelector}
@@ -169,7 +168,28 @@ class CPC(nn.Module):
         z_t = self.encoder(batch)
         c_t, _ = self.auto_regressive_encoder(z_t)
         # TODO is this the best choice for all datasets?
-        return th.mean(c_t, dim=1)
+        seq_lens = self._find_seq_lens(batch)
+        seq_lens = (
+            th.floor(seq_lens / self.encoder.downsample_factor).long()
+            - self.look_ahead
+            + 1
+        )
+        seq_lens = th.maximum(seq_lens, th.zeros_like(seq_lens) + 2)
+        # need to include only the items before seq_lens[i] because the rest is
+        # an encoding of zeros.
+        sum = th.stack(
+            [th.sum(c_t[i, : seq_lens[i], :], dim=0) for i in range(batch.size(0))]
+        )
+        return sum / seq_lens.unsqueeze(1).repeat(1, c_t.size(2))
+
+    def _find_seq_lens(self, batch):
+        # work out where the mask is zero
+        non_zero_indices = batch != 0.0
+        # find the max of the cumulative sum
+        _, seq_lens = th.max(non_zero_indices.cumsum(2), dim=2)
+        # take the max across the channels, and convert to a length,
+        # not an index
+        return (seq_lens + 1).max(dim=1).values
 
     @typechecked
     def forward(
@@ -189,32 +209,43 @@ class CPC(nn.Module):
         Returns:
             log_f_k (torch.Tensor): The logarithm of the score of all the z_{t+k} with c_t.
         """
-        seq_len = batch.size(-1)
+        batch_size = batch.size(0)
+        seq_lens = self._find_seq_lens(batch)
+        seq_lens = [
+            max(
+                int(seq_lens[i] / self.encoder.downsample_factor) - self.look_ahead + 1,
+                2,
+            )
+            for i in range(batch_size)
+        ]
         # t represents the first timestamp in z-space that we do NOT use for the context.
-        t = th.randint(
-            low=1,
-            high=int(seq_len / self.encoder.downsample_factor) - self.look_ahead + 1,
-            size=(1,),
-        )
+        ts = th.empty((batch_size,), dtype=int)
+        for i in range(batch_size):
+            ts[i] = th.randint(
+                low=1,
+                high=seq_lens[i],
+                size=(1,),
+            )
+        max_t = th.max(ts).item()
         # need to multiply by the downsample_factor because t has been selected
         # in the z-time space. In general have to map between z-time and batch-time
         # (i.e. invert encoder's shape transformation).
-        z_t: TensorType["batch", "z_size", "t + look_ahead"] = self.encoder(
-            batch[:, :, : (t + self.look_ahead) * self.encoder.downsample_factor]
-        )
+        z_t: TensorType["batch", "z_size", "t + look_ahead"] = self.encoder(batch)
 
         # pos are the examples that we are trying to predict
-        pos: TensorType["batch", "look_ahead", "z_size"] = z_t[:, :, t:].transpose(1, 2)
+        pos: TensorType["batch", "look_ahead", "z_size"] = th.stack(
+            [z_t[i, :, ts[i] : ts[i] + self.look_ahead] for i in range(batch_size)]
+        ).transpose(1, 2)
         # randomly (or otherwise) drawn samples from the batch.
         neg: TensorType[
             "batch", "look_ahead", "N-1", "z_size"
-        ] = self.negative_sample_selector(z_t)
-        out, _ = self.auto_regressive_encoder(z_t[:, :, :t])
+        ] = self.negative_sample_selector(z_t, seq_lens=seq_lens)
+        out, _ = self.auto_regressive_encoder(z_t[:, :, :max_t])
         # only need to retain the most recent output
-        c_t: TensorType["batch", "c_size"] = out[:, -1, :]
+        c_t: TensorType["batch", "c_size"] = out[range(batch_size), ts - 1, :]
 
-        pos_scores = th.empty((batch.size(0), self.look_ahead, 1))
-        neg_scores = th.empty((batch.size(0), self.look_ahead, self.N - 1))
+        pos_scores = th.empty((batch_size, self.look_ahead, 1))
+        neg_scores = th.empty((batch_size, self.look_ahead, self.N - 1))
         for k in range(self.look_ahead):
             transformed_c_t: TensorType["batch", "z_size"] = self.w_ks[k](c_t)
             # expand the dims to be the same size as neg

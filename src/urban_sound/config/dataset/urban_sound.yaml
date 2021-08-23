@@ -3,4 +3,6 @@ metadata_file: "data/UrbanSound8K/metadata/UrbanSound8K.csv"
 name: "urban_sound"
 channels: ???
 is_labelled: True
+is_pre_sliced: True
+grace_period: 0.25
 sample_rate: 16000

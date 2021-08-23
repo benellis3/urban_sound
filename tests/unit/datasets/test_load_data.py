@@ -19,18 +19,21 @@ def test_urban8k_dataset():
     audio_path, metadata_path = get_dataset_path("Urban8K")
     sample_rate = 16000
     max_length = 4  # must be in sync with the data file
+    grace_period = 0.1
     config = Mock(
         dataset=Mock(
             audio_dir=audio_path,
             metadata_file=metadata_path,
             is_labelled=True,
             sample_rate=sample_rate,
+            is_pre_sliced=True,
+            grace_period=grace_period,
         )
     )
     dataset = Urban8KDataset(config)
     aud, label = dataset[0]
     assert label == 3
-    assert aud.shape == (1, sample_rate * max_length)
+    assert aud.shape == (1, sample_rate * (max_length + grace_period))
 
 
 def test_transform():
@@ -41,6 +44,8 @@ def test_transform():
             metadata_file=metadata_path,
             is_labelled=True,
             sample_rate=16000,
+            is_pre_sliced=True,
+            grace_period=0.1,
         )
     )
     dataset = Urban8KDataset(
@@ -61,6 +66,8 @@ def test_bird_dataset():
             metadata_dir=metadata_path,
             is_labelled=True,
             sample_rate=16000,
+            is_pre_sliced=False,
+            grace_period=0.1,
         )
     )
     dataset = BirdDataset(config)

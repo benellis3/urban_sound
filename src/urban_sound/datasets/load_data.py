@@ -108,13 +108,17 @@ class AudioDataset(ABC):
 
     @cached_property
     def max_seq_length(self):
-        length_seconds = (self.metadata["end"] - self.metadata["start"]).max()
+        length_seconds = (
+            self.metadata["end"] - self.metadata["start"]
+        ).max() + self.grace_period  # add a few seconds grace -- the annotations are not exact
         sample_rate = self.sample_rate
         length_samples = int(np.ceil(length_seconds * sample_rate))
         return length_samples
 
     def pad_to_max_length(self, audio_tensor, sample_rate):
+        assert audio_tensor.size(1) > 0, "Cannot pad empty tensor"
         padding = self.max_seq_length - audio_tensor.size(1)
+        assert padding > -1
         effects = [
             ["pad", "0", f"{padding}s"],
             ["channels", "1"],
@@ -122,18 +126,16 @@ class AudioDataset(ABC):
         out, _ = apply_effects_tensor(
             audio_tensor, sample_rate, effects, channels_first=True
         )
+        assert not th.all(out == 0.0), "Padded audio should not be all silence"
         return out
 
     def resample(self, audio, sample_rate):
         effects = [["rate", f"{self.sample_rate}"]]
         out, _ = apply_effects_tensor(audio, sample_rate, effects, channels_first=True)
+        assert out.size(1) > 0, "Resampled to an empty tensor"
         return out
 
-    @typechecked
-    def __getitem__(self, index: int) -> Tuple[Any, np.integer]:
-        # get the info of the audio
-        audio_path = self._get_audio_path(index)
-        audio_metadata = info(audio_path)
+    def _load_with_slicing(self, index, audio_path, audio_metadata):
         start_frame = int(
             audio_metadata.sample_rate * self._get_metadata_item(index, "start")
         )
@@ -146,6 +148,22 @@ class AudioDataset(ABC):
             frame_offset=start_frame,
             num_frames=(end_frame - start_frame + 1),
         )
+        return audio, sample_rate
+
+    @typechecked
+    def __getitem__(self, index: int) -> Tuple[Any, np.integer]:
+        # get the info of the audio
+        audio_path = self._get_audio_path(index)
+        audio_metadata = info(audio_path)
+        if not self.is_pre_sliced:
+            audio, sample_rate = self._load_with_slicing(
+                index, audio_path, audio_metadata
+            )
+        else:
+            audio, sample_rate = load(filepath=audio_path)
+        assert audio.size(1) > 0 and not th.all(
+            audio == 0.0
+        ), "Loaded a null audio file"
         audio = self.resample(audio, sample_rate)
         audio = self.pad_to_max_length(audio, sample_rate)
         if self.transform:
@@ -171,7 +189,9 @@ class BirdDataset(AudioDataset, Dataset):
         self.transform = transform
         self.label_transform = label_transform
         self.is_labelled = config.dataset.is_labelled
+        self.is_pre_sliced = config.dataset.is_pre_sliced
         self.sample_rate = config.dataset.sample_rate
+        self.grace_period = config.dataset.grace_period
 
     def _clean_polyphony(self) -> None:
         """Remove all instances of polyphony (multiple sounds co-occurring) from the
@@ -245,7 +265,9 @@ class Urban8KDataset(AudioDataset, Dataset):
         self.transform = transform
         self.label_transform = label_transform
         self.is_labelled = config.dataset.is_labelled
+        self.is_pre_sliced = config.dataset.is_pre_sliced
         self.sample_rate = config.dataset.sample_rate
+        self.grace_period = config.dataset.grace_period
 
     def _get_audio_path(self, index: int) -> Path:
         fold = f"fold{self._get_metadata_item(index, 'fold')}"

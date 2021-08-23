@@ -2,4 +2,6 @@ audio_dir: "data/bird_data/Recordings"
 metadata_dir: "data/bird_data/Annotation_Files"
 name: "birds"
 is_labelled: True
+is_pre_sliced: False
+grace_period: 0.25
 channels: ???

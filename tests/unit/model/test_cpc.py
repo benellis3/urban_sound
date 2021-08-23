@@ -68,12 +68,16 @@ def test_negative_sample_selector():
     config = Mock(look_ahead=look_ahead, N=N)
     negative_sample_selector = RandomNegativeSampleSelector(config)
     idx_0 = th.zeros((batch_size, look_ahead, N - 1), dtype=int)
-    idx_1 = th.zeros((batch_size, look_ahead, N - 1), dtype=int)
-    with patch(f"{MUT}.th.randint", side_effect=[idx_0, idx_1]):
-        out = negative_sample_selector(data)
+    idx_1 = [th.zeros((look_ahead, N - 1), dtype=int) for _ in range(batch_size)]
+    with patch(f"{MUT}.th.randint", side_effect=[idx_0, *idx_1]) as rand:
+        seq_lens = th.arange(start=1, end=batch_size + 1, dtype=int)
+        out = negative_sample_selector(data, seq_lens)
         assert out.shape == (batch_size, look_ahead, N - 1, z_size)
         vals = th.tensor([i * T for i in range(z_size)])
         assert th.all(out == vals)
+        for i in range(batch_size):
+            rand.assert_any_call(seq_lens[i], size=(look_ahead, N - 1))
+        rand.assert_any_call(batch_size, size=(batch_size, look_ahead, N - 1))
 
 
 def test_cpc_shape(normal_data):
@@ -158,7 +162,11 @@ def test_cpc(z_t, c_t, negative_samples, pos, neg):
     encoder = Mock(side_effect=lambda _: z_t, downsample_factor=downsample_factor)
     ar_encoder = Mock(side_effect=lambda _: (c_t, None))
     look_ahead_layer = Mock(side_effect=lambda x: x)
-    negative_selector = Mock(side_effect=lambda _: negative_samples)
+
+    def neg_sample_func(batch, seq_lens):
+        return negative_samples
+
+    negative_selector = Mock(side_effect=neg_sample_func)
     config = Mock(
         device="cpu",
         z_size=z_size,
@@ -180,3 +188,35 @@ def test_cpc(z_t, c_t, negative_samples, pos, neg):
         out = cpc(batch)
         assert th.allclose(out.pos, pos)
         assert th.allclose(out.neg, neg)
+        # check the negative selector was called correctly
+
+
+def test_find_seq_lens():
+    # check that the randint calls are made correctly
+    config = Mock(
+        z_size=10,
+        c_size=10,
+        N=5,
+        look_ahead=1,
+        negative_sample_selector="random",
+        look_ahead_layer="linear",
+    )
+
+    batch = th.tensor(
+        [
+            [[1.4, 2.3, 3.0, 0.0, 0.0, 0.0, 0.0], [2.1, 1.0, 1.1, 1.5, 0.0, 0.0, 0.0]],
+            [[3.2, 1.3, 9.0, 4.5, 6.0, 7.5, 1.2], [1.0, 1.0, 1.0, 1, 1, 1, 1]],
+            [[2.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]],
+        ]
+    )
+
+    with patch(f"{MUT}.get_encoder", return_value=Mock()), patch(
+        f"{MUT}.get_arencoder", return_value=Mock()
+    ), patch(f"{MUT}.get_negative_selector", return_value=Mock(),), patch(
+        f"{MUT}.nn.ModuleList", return_value=[Mock()]
+    ), patch(
+        f"{MUT}.get_look_ahead_layers", return_value=Mock()
+    ):
+        cpc = CPC(config)
+        seq_lens = cpc._find_seq_lens(batch)
+        assert th.all(seq_lens == th.tensor([4, 7, 1]))

@@ -21,6 +21,7 @@ def log_tsne(
     embeddings: TensorType["N", "dims"],
     config: DictConfig,
     t: int,
+    tag=None,
     labels=None,
     display=False,
     label_map=None,
@@ -45,7 +46,8 @@ def log_tsne(
         sns.scatterplot(x="x", y="y", hue="label", data=data)
 
     if display:
-        plt.savefig(Path(getcwd()) / f"tsne_{t}.pdf")
+        fname = f"tsne_{t}.pdf" if not tag else f"tsne_{tag}_{t}.pdf"
+        plt.savefig(Path(getcwd()) / fname)
         plt.show(block=True)
     summary_writer = get_summary_writer()
     summary_writer.add_figure("tsne", fig, global_step=t)

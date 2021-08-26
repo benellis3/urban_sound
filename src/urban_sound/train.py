@@ -70,7 +70,15 @@ class Runner:
                     "accuracy/train", accuracy, global_step=self.t
                 )
             if self.config.log_output and self.t % self.config.tsne_interval == 0:
-                th.save(self.model.state_dict(), Path(os.getcwd()) / f"model_{self.t}")
+                fname = (
+                    "model_{self.t}.pt"
+                    if not hasattr(self.config, "tag")
+                    else f"model_{self.config.tag}_{self.t}.pt"
+                )
+                th.save(
+                    self.model.state_dict(),
+                    Path(os.getcwd()) / fname,
+                )
                 self.generate_tsne_embeddings()
                 self.model.train()
 

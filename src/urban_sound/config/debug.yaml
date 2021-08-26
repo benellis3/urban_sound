@@ -1,7 +1,7 @@
 device: ???
-z_size: 32
-c_size: 16
-encoder: "cnn"
+z_size: 64
+c_size: 32
+encoder: "cnn_small"
 arencoder: "gru"
 look_ahead_layer: "linear"
 look_ahead: 12
@@ -12,11 +12,14 @@ tsne_interval: 10000
 log_output: true
 N: 10
 shuffle: true
+saved_model: null
+generate_tsne_only: false
 tsne:
-  perplexity: 30
-  n_iter: 50000
+  perplexity: 40
+  n_iter: 17500
   learning_rate: 10
 optim:
   name: "Adam"
   lr: 0.0001
 negative_sample_selector: "random"
+embedding_generator: "mean_c"

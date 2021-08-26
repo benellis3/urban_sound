@@ -71,12 +71,25 @@ class Runner:
                 )
             if self.config.log_output and self.t % self.config.tsne_interval == 0:
                 th.save(self.model.state_dict(), Path(os.getcwd()) / f"model_{self.t}")
-                embeddings, all_labels = self._generate_tsne_embeddings()
-                if self.dataloader.dataset.is_labelled:
-                    log_tsne(embeddings, self.config, self.t, labels=all_labels)
-                else:
-                    log_tsne(embeddings, self.config, self.t)
+                self.generate_tsne_embeddings()
                 self.model.train()
+
+    def generate_tsne_embeddings(self, display=False) -> None:
+        embeddings, all_labels = self._generate_tsne_embeddings()
+        label_map = getattr(self.dataloader.dataset, "label_map", None)
+        if self.dataloader.dataset.is_labelled:
+            log_tsne(
+                embeddings,
+                self.config,
+                self.t,
+                labels=all_labels,
+                display=display,
+                label_map=label_map,
+            )
+        else:
+            log_tsne(
+                embeddings, self.config, self.t, display=display, label_map=label_map
+            )
 
     def _generate_tsne_embeddings(self) -> TensorType["N", "z_size"]:
         self.model.eval()
@@ -89,5 +102,5 @@ class Runner:
                 labels.append(label)
             return (
                 th.cat(embeddings).cpu().numpy(),
-                th.cat(labels).unsqueeze(1).cpu().numpy(),
+                th.cat(labels).unsqueeze(1).cpu().long().numpy(),
             )

@@ -268,6 +268,18 @@ class Urban8KDataset(AudioDataset, Dataset):
         self.is_pre_sliced = config.dataset.is_pre_sliced
         self.sample_rate = config.dataset.sample_rate
         self.grace_period = config.dataset.grace_period
+        self.label_map = {
+            0: "air_conditioner",
+            1: "car_horn",
+            2: "children_playing",
+            3: "dog_bark",
+            4: "drilling",
+            5: "engine_idling",
+            6: "gun_shot",
+            7: "jackhammer",
+            8: "siren",
+            9: "street_music",
+        }
 
     def _get_audio_path(self, index: int) -> Path:
         fold = f"fold{self._get_metadata_item(index, 'fold')}"

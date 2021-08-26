@@ -1,4 +1,4 @@
-from typing import Dict, NamedTuple, Tuple
+from typing import Dict, List, NamedTuple, Tuple
 from functools import reduce
 from omegaconf.dictconfig import DictConfig
 import torch as th
@@ -12,19 +12,37 @@ import logging
 patch_typeguard()
 LOG = logging.getLogger(__name__)
 
+ARCHITECTURE_REGISTRY = {
+    "cnn_large": {
+        "kernel_size": [10, 8, 4, 4, 4],
+        "stride": [5, 4, 2, 2, 2],
+        "padding": [3, 2, 1, 1, 1],
+    },
+    "cnn_small": {
+        "kernel_size": [10, 4, 4, 4, 4],
+        "stride": [5, 2, 2, 2, 2],
+        "padding": [3, 1, 1, 1, 1],
+    },
+    "cnn_tiny": {
+        "kernel_size": [4, 4, 4, 4],
+        "stride": [2, 2, 2, 2],
+        "padding": [1, 1, 1, 1],
+    },
+}
+
+
+def get_params(architecture_key: str) -> Dict[str, Dict[str, List[int]]]:
+    return ARCHITECTURE_REGISTRY[architecture_key]
+
 
 class CNNEncoder(nn.Module):
-    def __init__(self, size, in_channels, device="cpu"):
+    def __init__(self, size, in_channels, architecture_key, device="cpu"):
         super().__init__()
         self.size = size
         self.in_channels = in_channels
         self.layers = 5
         self.device = device
-        self.params = {
-            "kernel_size": [10, 8, 4, 4, 4],
-            "stride": [5, 4, 2, 2, 2],
-            "padding": [3, 2, 1, 1, 1],
-        }
+        self.params = get_params(architecture_key=architecture_key)
         assert self.layers == len(self.params["kernel_size"])
         assert self.layers == len(self.params["stride"])
         assert self.layers == len(self.params["padding"])
@@ -59,11 +77,15 @@ class CNNEncoder(nn.Module):
         return reduce(operator.mul, self.params["stride"])
 
 
-ENCODERS = {"cnn": CNNEncoder}
+ENCODERS_REGISTRY = {
+    "cnn_small": CNNEncoder,
+    "cnn_large": CNNEncoder,
+    "cnn_tiny": CNNEncoder,
+}
 
 
 def get_encoder(key):
-    return ENCODERS[key]
+    return ENCODERS_REGISTRY[key]
 
 
 class AutoRegressiveEncoder(nn.Module):
@@ -91,11 +113,11 @@ class AutoRegressiveEncoder(nn.Module):
         raise NotImplementedError("No init hidden")
 
 
-ARENCODERS = {"gru": AutoRegressiveEncoder}
+ARENCODERS_REGISTRY = {"gru": AutoRegressiveEncoder}
 
 
 def get_arencoder(key):
-    return ARENCODERS[key]
+    return ARENCODERS_REGISTRY[key]
 
 
 class RandomNegativeSampleSelector:
@@ -118,18 +140,56 @@ class RandomNegativeSampleSelector:
         return batch[idx_0, :, th.stack(idx_1)]
 
 
-NEGATIVE_SELECTORS = {"random": RandomNegativeSampleSelector}
+NEGATIVE_SELECTORS_REGISTRY = {"random": RandomNegativeSampleSelector}
 
 
 def get_negative_selector(key):
-    return NEGATIVE_SELECTORS[key]
+    return NEGATIVE_SELECTORS_REGISTRY[key]
 
 
-LOOK_AHEAD_LAYERS = {"linear": nn.Linear}
+LOOK_AHEAD_LAYERS_REGISTRY = {"linear": nn.Linear}
 
 
 def get_look_ahead_layers(key):
-    return LOOK_AHEAD_LAYERS[key]
+    return LOOK_AHEAD_LAYERS_REGISTRY[key]
+
+
+class MeanCEmbeddingGenerator:
+    """Class which generates an embedding from
+    the c_t across time by simply averaging them
+    """
+
+    def __init__(self, config):
+        pass
+
+    def __call__(self, z_t, c_t, seq_lens):
+        # need to include only the items before seq_lens[i] because the rest is
+        # an encoding of zeros.
+        the_sum = th.stack(
+            [th.sum(c_t[i, : seq_lens[i], :], dim=0) for i in range(c_t.size(0))]
+        )
+        return the_sum / seq_lens.unsqueeze(1).repeat(1, c_t.size(2))
+
+
+class MeanZEmbeddingGenerator:
+    def __init__(self, config):
+        pass
+
+    def __call__(self, z_t, c_t, seq_lens):
+        the_sum = th.stack(
+            [th.sum(z_t[i, :, : seq_lens[i]], dim=1) for i in range(z_t.size(0))]
+        )
+        return the_sum / seq_lens.unsqueeze(1).repeat(1, z_t.size(1))
+
+
+EMBEDDING_GENERATORS_REGISTRY = {
+    "mean_c": MeanCEmbeddingGenerator,
+    "mean_z": MeanZEmbeddingGenerator,
+}
+
+
+def get_embedding_generator(key):
+    return EMBEDDING_GENERATORS_REGISTRY[key]
 
 
 Scores = NamedTuple("Scores", [("pos", TensorType), ("neg", TensorType)])
@@ -143,7 +203,7 @@ class CPC(nn.Module):
         self.z_size = config.z_size
         self.c_size = config.c_size
         self.encoder = get_encoder(config.encoder)(
-            self.z_size, config.dataset.channels, device=self.device
+            self.z_size, config.dataset.channels, config.encoder, device=self.device
         )
         self.auto_regressive_encoder = get_arencoder(config.arencoder)(
             self.z_size, self.c_size, device=self.device
@@ -161,13 +221,16 @@ class CPC(nn.Module):
         self.negative_sample_selector = get_negative_selector(
             config.negative_sample_selector
         )(config)
+        self.embedding_generator = get_embedding_generator(config.embedding_generator)(
+            config
+        )
 
     def generate_embeddings(
         self, batch: TensorType["batch", "channels", "time"]
     ) -> TensorType["batch", "c_size"]:
+        batch = batch.to(self.device)
         z_t = self.encoder(batch)
         c_t, _ = self.auto_regressive_encoder(z_t)
-        # TODO is this the best choice for all datasets?
         seq_lens = self._find_seq_lens(batch)
         seq_lens = (
             th.floor(seq_lens / self.encoder.downsample_factor).long()
@@ -175,12 +238,7 @@ class CPC(nn.Module):
             + 1
         )
         seq_lens = th.maximum(seq_lens, th.zeros_like(seq_lens) + 2)
-        # need to include only the items before seq_lens[i] because the rest is
-        # an encoding of zeros.
-        sum = th.stack(
-            [th.sum(c_t[i, : seq_lens[i], :], dim=0) for i in range(batch.size(0))]
-        )
-        return sum / seq_lens.unsqueeze(1).repeat(1, c_t.size(2))
+        return self.embedding_generator(z_t, c_t, seq_lens)
 
     def _find_seq_lens(self, batch):
         # work out where the mask is zero
@@ -209,6 +267,7 @@ class CPC(nn.Module):
         Returns:
             log_f_k (torch.Tensor): The logarithm of the score of all the z_{t+k} with c_t.
         """
+        batch = batch.to(self.device)
         batch_size = batch.size(0)
         seq_lens = self._find_seq_lens(batch)
         seq_lens = [

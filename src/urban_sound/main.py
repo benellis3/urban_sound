@@ -1,12 +1,12 @@
 from typing import Dict
 from torch.optim.optimizer import Optimizer
 from torch.utils.data import DataLoader
+from torch import load, optim, cuda, device
 import logging
 import hydra
 from omegaconf import DictConfig
 from torch.utils.data.dataset import Dataset
 from urban_sound.datasets import get_dataset
-from torch import optim, cuda
 from urban_sound.logging.log import get_summary_writer
 from urban_sound.model.cpc import CPC
 from urban_sound.train import Runner
@@ -49,12 +49,21 @@ def main(config: DictConfig) -> None:
         dataset, batch_size=config.batch_size, shuffle=config.shuffle
     )
     model = CPC(config)
+    if config.saved_model:
+        model.load_state_dict(
+            load(config.saved_model, map_location=device(config.device))
+        )
+
     optimiser = _make_optimiser(model, config)
     runner = Runner(model, dataloader, optimiser, config)
-    for epoch in range(config.epochs):
-        LOG.info(f"Starting epoch {epoch}")
-        runner.train()
-    close_summary_writer()
+    if not config.generate_tsne_only:
+        for epoch in range(config.epochs):
+            LOG.info(f"Starting epoch {epoch}")
+            runner.train()
+        close_summary_writer()
+    else:
+        runner.generate_tsne_embeddings(display=True)
+        close_summary_writer()
 
 
 if __name__ == "__main__":

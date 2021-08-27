@@ -10,11 +10,29 @@ import pandas as pd
 import numpy as np
 from os import getcwd
 from pathlib import Path
+from umap import UMAP
 
 
 @lru_cache(maxsize=1)
 def get_summary_writer():
     return SummaryWriter()
+
+
+def get_dim_reducer(config):
+    if config.dim_reduction.name == "tsne":
+        return TSNE(
+            perplexity=config.dim_reduction.perplexity,
+            n_iter=config.dim_reduction.n_iter,
+            learning_rate=config.dim_reduction.learning_rate,
+        )
+    elif config.dim_reduction.name == "umap":
+        return UMAP(
+            n_neighbors=config.dim_reduction.n_neighbours,
+            n_components=config.dim_reduction.n_components,
+            min_dist=config.dim_reduction.min_dist,
+        )
+    else:
+        raise Exception("Do not recognise dimensionality reduction param")
 
 
 def log_tsne(
@@ -26,12 +44,8 @@ def log_tsne(
     display=False,
     label_map=None,
 ) -> None:
-    tsne = TSNE(
-        perplexity=config.tsne.perplexity,
-        n_iter=config.tsne.n_iter,
-        learning_rate=config.tsne.learning_rate,
-    )
-    clusters = tsne.fit_transform(embeddings)
+    dim_reducer = get_dim_reducer(config)
+    clusters = dim_reducer.fit_transform(embeddings)
     # plot the clusters
     fig, _ = plt.subplots(1, 1)
     if labels is None:

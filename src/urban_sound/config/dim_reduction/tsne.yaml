@@ -1,0 +1,4 @@
+perplexity: 40
+n_iter: 17500
+learning_rate: 10
+name: "tsne"

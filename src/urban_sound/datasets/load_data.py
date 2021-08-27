@@ -152,6 +152,8 @@ class AudioDataset(ABC):
 
     @typechecked
     def __getitem__(self, index: int) -> Tuple[Any, np.integer]:
+        if index in self.cache:
+            return self.cache[index]
         # get the info of the audio
         audio_path = self._get_audio_path(index)
         audio_metadata = info(audio_path)
@@ -171,6 +173,7 @@ class AudioDataset(ABC):
         label = self._get_metadata_item(index, "classID")
         if self.label_transform:
             label = self.label_transform(label)
+        self.cache[index] = (audio, label)
         return audio, label
 
 
@@ -192,6 +195,7 @@ class BirdDataset(AudioDataset, Dataset):
         self.is_pre_sliced = config.dataset.is_pre_sliced
         self.sample_rate = config.dataset.sample_rate
         self.grace_period = config.dataset.grace_period
+        self.cache = {}
 
     def _clean_polyphony(self) -> None:
         """Remove all instances of polyphony (multiple sounds co-occurring) from the
@@ -280,6 +284,7 @@ class Urban8KDataset(AudioDataset, Dataset):
             8: "siren",
             9: "street_music",
         }
+        self.cache = {}
 
     def _get_audio_path(self, index: int) -> Path:
         fold = f"fold{self._get_metadata_item(index, 'fold')}"

@@ -13,6 +13,11 @@ patch_typeguard()
 LOG = logging.getLogger(__name__)
 
 ARCHITECTURE_REGISTRY = {
+    "cnn_huge": {
+        "kernel_size": [10, 10, 8, 4, 4, 4, 4],
+        "stride": [5, 5, 4, 2, 2, 2, 2],
+        "padding": [3, 3, 2, 1, 1, 1, 1],
+    },
     "cnn_large": {
         "kernel_size": [10, 8, 4, 4, 4],
         "stride": [5, 4, 2, 2, 2],
@@ -40,9 +45,9 @@ class CNNEncoder(nn.Module):
         super().__init__()
         self.size = size
         self.in_channels = in_channels
-        self.layers = 5
         self.device = device
         self.params = get_params(architecture_key=architecture_key)
+        self.layers = len(self.params["kernel_size"])
         assert self.layers == len(self.params["kernel_size"])
         assert self.layers == len(self.params["stride"])
         assert self.layers == len(self.params["padding"])
@@ -81,6 +86,7 @@ ENCODERS_REGISTRY = {
     "cnn_small": CNNEncoder,
     "cnn_large": CNNEncoder,
     "cnn_tiny": CNNEncoder,
+    "cnn_huge": CNNEncoder,
 }
 
 

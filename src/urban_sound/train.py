@@ -1,9 +1,11 @@
 from omegaconf.dictconfig import DictConfig
 from hydra.utils import to_absolute_path
+from torch.profiler.profiler import tensorboard_trace_handler
 from torch.utils.tensorboard.writer import SummaryWriter
 from urban_sound.logging.log import get_summary_writer, log_tsne
 from urban_sound.model.cpc import CPC, Scores
 from torch.utils.data import DataLoader
+from torch.profiler import profile, schedule, ProfilerActivity
 from torch import optim
 import torch as th
 import torch.nn.functional as F
@@ -46,10 +48,7 @@ class Runner:
         self.config = config
         self.t = 0
 
-    def train(self) -> None:
-        # iterate through the dataloader
-        self.model.train()
-        iter = tqdm(self.dataloader, dynamic_ncols=True)
+    def _train_loop(self, iter, profiler=None) -> None:
         for (batch, _) in iter:
             # compute the scores
             log_scores: Scores = self.model(batch)
@@ -58,6 +57,8 @@ class Runner:
             self.optimiser.zero_grad()
             loss.backward()
             self.optimiser.step()
+            if profiler is not None:
+                profiler.step()
             self.t += 1
 
             if self.config.log_output and self.t % self.config.update_interval == 0:
@@ -81,6 +82,21 @@ class Runner:
                 )
                 self.generate_tsne_embeddings()
                 self.model.train()
+
+
+    def train(self) -> None:
+        # iterate through the dataloader
+        self.model.train()
+        iter = tqdm(self.dataloader, dynamic_ncols=True)
+        if self.config.device == "cuda":
+            activities = [ ProfilerActivity.CPU, ProfilerActivity.CUDA ]
+            with profile(schedule=schedule(wait=1, warmup=1, active=3), on_trace_ready=tensorboard_trace_handler,
+            activities=activities) as profiler:
+                self._train_loop(iter, profiler=profiler)
+        else:
+            # profiling does not work on Mac because we don't have Kineto
+            # internet does not seem to have a suggestion for how to fix this
+            self._train_loop(iter)
 
     def generate_tsne_embeddings(self, display=False) -> None:
         embeddings, all_labels = self._generate_tsne_embeddings()

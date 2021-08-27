@@ -83,15 +83,21 @@ class Runner:
                 self.generate_tsne_embeddings()
                 self.model.train()
 
-
     def train(self) -> None:
         # iterate through the dataloader
         self.model.train()
         iter = tqdm(self.dataloader, dynamic_ncols=True)
-        if self.config.device == "cuda":
-            activities = [ ProfilerActivity.CPU, ProfilerActivity.CUDA ]
-            with profile(schedule=schedule(wait=1, warmup=1, active=3), on_trace_ready=tensorboard_trace_handler,
-            activities=activities) as profiler:
+        if self.config.device == "cuda" and self.config.profiler.profile:
+            activities = [ProfilerActivity.CPU, ProfilerActivity.CUDA]
+            with profile(
+                schedule=schedule(
+                    wait=self.config.profiler.wait,
+                    warmup=self.config.profiler.warmup,
+                    active=self.config.profiler.active,
+                ),
+                on_trace_ready=tensorboard_trace_handler,
+                activities=activities,
+            ) as profiler:
                 self._train_loop(iter, profiler=profiler)
         else:
             # profiling does not work on Mac because we don't have Kineto

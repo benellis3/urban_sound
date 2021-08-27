@@ -11,6 +11,7 @@ data/
 # hydra
 .hydra/
 outputs/
+multirun/
 # C extensions
 *.so
 

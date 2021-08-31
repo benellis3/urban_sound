@@ -5,6 +5,7 @@ from torchtyping import TensorType
 from sklearn.manifold import TSNE
 from omegaconf import DictConfig
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 import seaborn as sns
 import pandas as pd
 import numpy as np
@@ -35,6 +36,20 @@ def get_dim_reducer(config):
         raise Exception("Do not recognise dimensionality reduction param")
 
 
+def plot3D(df):
+    fig = plt.figure()
+    ax = Axes3D(fig)
+    if "label" in df.columns:
+        for label_name, label_idx in df.groupby("label").groups.items():
+            x = df.iloc[label_idx, 0]
+            y = df.iloc[label_idx, 1]
+            z = df.iloc[label_idx, 2]
+            ax.scatter(x, y, z, label=label_name)
+    else:
+        ax.scatter(df.loc["x"], df.loc["y"], df.loc["z"])
+    return fig
+
+
 def log_tsne(
     embeddings: TensorType["N", "dims"],
     config: DictConfig,
@@ -47,17 +62,27 @@ def log_tsne(
     dim_reducer = get_dim_reducer(config)
     clusters = dim_reducer.fit_transform(embeddings)
     # plot the clusters
-    fig, _ = plt.subplots(1, 1)
+    is_3d = config.dim_reduction.n_components == 3
+    columns = ["x", "y", "z"] if is_3d else ["x", "y"]
     if labels is None:
-        data = pd.DataFrame(data=clusters, columns=["x", "y"])
-        sns.scatterplot(x="x", y="y", data=data)
+        data = pd.DataFrame(data=clusters, columns=columns)
+        if is_3d:
+            fig = plot3D(data)
+        else:
+            fig, _ = plt.subplots(1, 1)
+            sns.scatterplot(x="x", y="y", data=data)
     else:
+        columns.append("label")
         data = pd.DataFrame(
-            data=np.concatenate([clusters, labels], axis=1), columns=["x", "y", "label"]
+            data=np.concatenate([clusters, labels], axis=1), columns=columns
         )
         if label_map:
             data = data.replace({"label": label_map})
-        sns.scatterplot(x="x", y="y", hue="label", data=data)
+        if is_3d:
+            fig = plot3D(data)
+        else:
+            fig, _ = plt.subplots(1, 1)
+            sns.scatterplot(x="x", y="y", hue="label", data=data)
 
     if display:
         fname = f"tsne_{t}.pdf" if not tag else f"tsne_{tag}_{t}.pdf"

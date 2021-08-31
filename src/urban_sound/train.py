@@ -18,11 +18,6 @@ from pathlib import Path
 LOG = logging.getLogger(__name__)
 
 
-def make_optimiser(model, config):
-    optimiser_class = getattr(optim, config.optimiser)
-    return optimiser_class(model.parameters(), lr=config.lr)
-
-
 def _compute_accuracy(scores):
     accuracy = scores.pos > scores.neg
     accuracy = th.all(accuracy, -1)
@@ -61,7 +56,10 @@ class Runner:
                 profiler.step()
             self.t += 1
 
-            if self.config.log_output and self.t % self.config.update_interval == 0:
+            if (
+                self.config.training.log_output
+                and self.t % self.config.training.update_interval == 0
+            ):
                 loss = loss.item()
                 accuracy = _compute_accuracy(log_scores)
                 iter.set_postfix({"loss": loss, "accuracy": accuracy})
@@ -70,7 +68,10 @@ class Runner:
                 summary_writer.add_scalar(
                     "accuracy/train", accuracy, global_step=self.t
                 )
-            if self.config.log_output and self.t % self.config.tsne_interval == 0:
+            if (
+                self.config.training.log_output
+                and self.t % self.config.training.tsne_interval == 0
+            ):
                 fname = (
                     "model_{self.t}.pt"
                     if not hasattr(self.config, "tag")
@@ -122,15 +123,26 @@ class Runner:
             )
 
     def _generate_tsne_embeddings(self) -> TensorType["N", "z_size"]:
+        if self.config.embeddings.load_embeddings:
+            embeddings = th.load(
+                self.config.embeddings.embeddings_path, map_location="cpu"
+            )
+            labels = th.load(self.config.embeddings.labels_path, map_location="cpu")
+            return (embeddings.numpy(), labels.numpy())
         self.model.eval()
         embeddings = []
         labels = []
         with th.no_grad():
             for (batch, label) in tqdm(self.dataloader):
-                embedding = self.model.generate_embeddings(batch)
+                embedding, new_label = self.model.generate_embeddings(batch, label)
                 embeddings.append(embedding)
-                labels.append(label)
+                labels.append(new_label)
+            embeddings = th.cat(embeddings).cpu()
+            labels = th.cat(labels).unsqueeze(1).cpu().long()
+            if self.config.embeddings.save_embeddings:
+                th.save(Path(os.getcwd()) / f"embeddings_{self.config.tag}.pt")
+                th.save(Path(os.getcwd()) / f"labels_{self.config.tag}.pt")
             return (
-                th.cat(embeddings).cpu().numpy(),
-                th.cat(labels).unsqueeze(1).cpu().long().numpy(),
+                embeddings.numpy(),
+                labels.numpy(),
             )

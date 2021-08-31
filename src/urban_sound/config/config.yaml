@@ -1,0 +1,40 @@
+device: ???
+model:
+  z_size: 512
+  c_size: 256
+  encoder: "cnn_large"
+  arencoder: "gru"
+  look_ahead_layer: "linear"
+  look_ahead: 12
+  N: 10
+  negative_sample_selector: "random"
+  embedding_generator: "mean_c"
+
+training:
+  update_interval: 50
+  tsne_interval: 10000
+  log_output: true
+  shuffle: true
+  batch_size: 8
+  epochs: 100
+
+saved_model: null
+generate_tsne_only: false
+profiler:
+  profile: false
+  warmup: 1
+  active: 3
+  wait: 1
+optim:
+  name: "Adam"
+  lr: 0.0001
+
+embeddings:
+  save_embeddings: false
+  load_embeddings: false
+  embeddings_path: null
+  labels_path: null
+
+defaults:
+  - dataset: "urban_sound"
+  - dim_reduction: "umap"

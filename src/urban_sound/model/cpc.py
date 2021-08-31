@@ -129,8 +129,8 @@ def get_arencoder(key):
 class RandomNegativeSampleSelector:
     def __init__(self, config: DictConfig):
         self.args = config
-        self.N = config.N
-        self.look_ahead = config.look_ahead
+        self.N = config.model.N
+        self.look_ahead = config.model.look_ahead
 
     @typechecked
     def __call__(
@@ -168,29 +168,56 @@ class MeanCEmbeddingGenerator:
     def __init__(self, config):
         pass
 
-    def __call__(self, z_t, c_t, seq_lens):
+    def __call__(self, z_t, c_t, seq_lens, label):
         # need to include only the items before seq_lens[i] because the rest is
         # an encoding of zeros.
         the_sum = th.stack(
             [th.sum(c_t[i, : seq_lens[i], :], dim=0) for i in range(c_t.size(0))]
         )
-        return the_sum / seq_lens.unsqueeze(1).repeat(1, c_t.size(2))
+        return the_sum / seq_lens.unsqueeze(1).repeat(1, c_t.size(2)), label
 
 
 class MeanZEmbeddingGenerator:
     def __init__(self, config):
         pass
 
-    def __call__(self, z_t, c_t, seq_lens):
+    def __call__(self, z_t, c_t, seq_lens, label):
         the_sum = th.stack(
             [th.sum(z_t[i, :, : seq_lens[i]], dim=1) for i in range(z_t.size(0))]
         )
-        return the_sum / seq_lens.unsqueeze(1).repeat(1, z_t.size(1))
+        return the_sum / seq_lens.unsqueeze(1).repeat(1, z_t.size(1)), label
+
+
+class ZIdentityEmbeddingGenerator:
+    def __init__(self, config):
+        pass
+
+    def __call__(self, z_t, c_t, seq_lens, labels):
+        zs = [
+            (z_t[i, :, : seq_lens[i]], labels[i].unsqueeze(0).repeat(seq_lens[i]))
+            for i in range(z_t.size(0))
+        ]
+        zs = [(z.transpose(0, 1), label) for z, label in zs]
+        return th.cat([z[0] for z in zs]), th.cat([z[1] for z in zs])
+
+
+class CIdentityEmbeddingGenerator:
+    def __init__(self, config):
+        pass
+
+    def __call__(self, z_t, c_t, seq_lens, labels):
+        cs = [
+            (c_t[i, : seq_lens[i], :], labels[i].repeat(seq_lens[i]))
+            for i in range(c_t.size(0))
+        ]
+        return th.cat([c[0] for c in cs]), th.cat([c[1] for c in cs])
 
 
 EMBEDDING_GENERATORS_REGISTRY = {
     "mean_c": MeanCEmbeddingGenerator,
     "mean_z": MeanZEmbeddingGenerator,
+    "identity_c": CIdentityEmbeddingGenerator,
+    "identity_z": ZIdentityEmbeddingGenerator,
 }
 
 
@@ -206,33 +233,38 @@ class CPC(nn.Module):
         super().__init__()
         self.config = config
         self.device = config.device
-        self.z_size = config.z_size
-        self.c_size = config.c_size
-        self.encoder = get_encoder(config.encoder)(
-            self.z_size, config.dataset.channels, config.encoder, device=self.device
+        self.z_size = config.model.z_size
+        self.c_size = config.model.c_size
+        self.encoder = get_encoder(config.model.encoder)(
+            self.z_size,
+            config.dataset.channels,
+            config.model.encoder,
+            device=self.device,
         )
-        self.auto_regressive_encoder = get_arencoder(config.arencoder)(
+        self.auto_regressive_encoder = get_arencoder(config.model.arencoder)(
             self.z_size, self.c_size, device=self.device
         )
-        self.look_ahead = config.look_ahead
+        self.look_ahead = config.model.look_ahead
         self.w_ks = nn.ModuleList(
             [
-                get_look_ahead_layers(config.look_ahead_layer)(
+                get_look_ahead_layers(config.model.look_ahead_layer)(
                     self.c_size, self.z_size, bias=False
                 ).to(self.device)
                 for _ in range(self.look_ahead)
             ]
         )
-        self.N = config.N
+        self.N = config.model.N
         self.negative_sample_selector = get_negative_selector(
-            config.negative_sample_selector
+            config.model.negative_sample_selector
         )(config)
-        self.embedding_generator = get_embedding_generator(config.embedding_generator)(
-            config
-        )
+        self.embedding_generator = get_embedding_generator(
+            config.model.embedding_generator
+        )(config)
 
     def generate_embeddings(
-        self, batch: TensorType["batch", "channels", "time"]
+        self,
+        batch: TensorType["batch", "channels", "time"],
+        label: TensorType["batch", "labels"],
     ) -> TensorType["batch", "c_size"]:
         batch = batch.to(self.device)
         z_t = self.encoder(batch)
@@ -244,7 +276,7 @@ class CPC(nn.Module):
             + 1
         )
         seq_lens = th.maximum(seq_lens, th.zeros_like(seq_lens) + 2)
-        return self.embedding_generator(z_t, c_t, seq_lens)
+        return self.embedding_generator(z_t, c_t, seq_lens, label)
 
     def _find_seq_lens(self, batch):
         # work out where the mask is zero

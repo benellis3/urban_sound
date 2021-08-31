@@ -40,13 +40,13 @@ def close_summary_writer() -> None:
     summary_writer.close()
 
 
-@hydra.main(config_path="config", config_name="debug")
+@hydra.main(config_path="config", config_name="config")
 def main(config: DictConfig) -> None:
     dataset = get_dataset(config)
     _add_device_to_config(config)
     _add_number_channels_to_config(dataset, config)
     dataloader = DataLoader(
-        dataset, batch_size=config.batch_size, shuffle=config.shuffle
+        dataset, batch_size=config.training.batch_size, shuffle=config.training.shuffle
     )
     model = CPC(config)
     if config.saved_model:
@@ -57,7 +57,7 @@ def main(config: DictConfig) -> None:
     optimiser = _make_optimiser(model, config)
     runner = Runner(model, dataloader, optimiser, config)
     if not config.generate_tsne_only:
-        for epoch in range(config.epochs):
+        for epoch in range(config.training.epochs):
             LOG.info(f"Starting epoch {epoch}")
             runner.train()
         close_summary_writer()

@@ -36,7 +36,7 @@ class data_getter:
 
         station_dir = os.path.join(self.seismic_path, station_name)
         # Get csv with name of file, start and end times
-        df = pd.read_csv(os.path.join(station_dir, "files_times_split.csv"))
+        df = pd.read_csv(os.path.join(station_dir, "files_times.csv"))
         df["start"] = [UTCDateTime(t) for t in df["start"]]
         df["end"] = [UTCDateTime(t) for t in df["end"]]
         inds = df[

@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from omegaconf.dictconfig import DictConfig
 
 from urban_sound.datasets.load_data import (
     ClusteredDataset,
+    RumbleOnlyElephantData,
     Urban8KDataset,
     BirdDataset,
     SortedNumbersDataset,
@@ -16,6 +16,7 @@ DATASETS = {
     "urban_sound": Urban8KDataset,
     "numbers": SortedNumbersDataset,
     "clusters": ClusteredDataset,
+    "rumble_only_elephant": RumbleOnlyElephantData,
 }
 
 

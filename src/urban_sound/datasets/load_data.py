@@ -4,13 +4,15 @@ from typing import Tuple, Union, Any
 from functools import cached_property
 
 from torch.utils.data import Dataset
-from pandas import read_csv, concat
+from pandas import read_csv, concat, Timedelta
 from torchaudio import info, load
 from torchaudio.sox_effects import apply_effects_tensor
 from torchtyping import TensorType, patch_typeguard
 import torch as th
 import numpy as np
 from typeguard import typechecked
+from urban_sound.datasets.kenya_data_getter import data_getter
+from obspy.core.utcdatetime import UTCDateTime
 
 from urban_sound.datasets.line_sweep import remove_overlap
 
@@ -289,3 +291,54 @@ class Urban8KDataset(AudioDataset, Dataset):
     def _get_audio_path(self, index: int) -> Path:
         fold = f"fold{self._get_metadata_item(index, 'fold')}"
         return self.dir / fold / self._get_metadata_item(index, "slice_file_name")
+
+
+class RumbleOnlyElephantData(Dataset):
+    def __init__(self, config, transform=None):
+        root_dir = _get_root_dir()
+        self.rumble_only_metadata = read_csv(
+            root_dir / config.dataset.directory / "metadata.csv", parse_dates=["events"]
+        )
+        self.rumble_only_metadata = self.rumble_only_metadata.loc[
+            self.rumble_only_metadata["rumble"] == 1
+        ]
+        self.transform = transform
+        self.seismic_data_loader = data_getter(
+            seismic_path=root_dir / config.dataset.directory
+        )
+        self.timedelta = config.dataset.timedelta
+        self.is_labelled = config.dataset.is_labelled
+        self._construct_data()
+
+    def __len__(self):
+        return len(self.rumble_only_metadata)
+
+    def _construct_data(self):
+        # read in the rumble data from the csv file
+        self.rumble_only_metadata["start"] = self.rumble_only_metadata[
+            "events"
+        ] - Timedelta(seconds=self.timedelta)
+        self.rumble_only_metadata["start"] = self.rumble_only_metadata["start"].apply(
+            UTCDateTime
+        )
+        self.rumble_only_metadata["end"] = self.rumble_only_metadata[
+            "events"
+        ] + Timedelta(seconds=self.timedelta)
+        self.rumble_only_metadata["end"] = self.rumble_only_metadata["end"].apply(
+            UTCDateTime
+        )
+
+    def __getitem__(self, index):
+        start = self._get_metadata_item(index, "start")
+        end = self._get_metadata_item(index, "end")
+        station = self._get_metadata_item(index, "station")
+        components = ["_e_", "_n_", "_z_"]
+        streams = self.seismic_data_loader.get_seismic(station, start, end, components)
+        stream = streams[0] + streams[1] + streams[2]
+        data = np.stack([t.data for t in stream.traces])
+        return th.tensor(data), th.tensor(0)
+
+    def _get_metadata_item(self, index: int, column: int):
+        return self.rumble_only_metadata.iloc[
+            index, self.rumble_only_metadata.columns.get_loc(column)
+        ]

@@ -2,7 +2,7 @@ device: ???
 model:
   z_size: 512
   c_size: 256
-  encoder: "cnn_large"
+  encoder: "cnn_small"
   arencoder: "gru"
   look_ahead_layer: "linear"
   look_ahead: 12

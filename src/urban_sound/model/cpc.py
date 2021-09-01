@@ -70,7 +70,7 @@ class CNNEncoder(nn.Module):
     def forward(
         self, input: TensorType["batch", "channels", "length"]
     ) -> TensorType["batch", -1, -1]:
-        x = input.to(self.device)
+        x = input.float().to(self.device)
         for layer in range(self.layers):
             x = self.module_list[layer * 2](x)
             x = self.module_list[layer * 2 + 1](x)
@@ -113,7 +113,7 @@ class AutoRegressiveEncoder(nn.Module):
         output -- the output of the RNN
         hidden -- the final hidden state of the module
         """
-        return self.network(th.transpose(x.to(self.device), 1, 2))
+        return self.network(th.transpose(x.float().to(self.device), 1, 2))
 
     def init_hidden(self, batch_size):
         raise NotImplementedError("No init hidden")
@@ -266,7 +266,7 @@ class CPC(nn.Module):
         batch: TensorType["batch", "channels", "time"],
         label: TensorType["batch", "labels"],
     ) -> TensorType["batch", "c_size"]:
-        batch = batch.to(self.device)
+        batch = batch.float().to(self.device)
         z_t = self.encoder(batch)
         c_t, _ = self.auto_regressive_encoder(z_t)
         seq_lens = self._find_seq_lens(batch)
@@ -305,7 +305,7 @@ class CPC(nn.Module):
         Returns:
             log_f_k (torch.Tensor): The logarithm of the score of all the z_{t+k} with c_t.
         """
-        batch = batch.to(self.device)
+        batch = batch.float().to(self.device)
         batch_size = batch.size(0)
         seq_lens = self._find_seq_lens(batch)
         seq_lens = [

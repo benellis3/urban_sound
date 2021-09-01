@@ -94,6 +94,7 @@ def test_elephant_dataset():
             directory=audio_path,
             is_labelled=False,
             name="rumble_only_elephant",
+            sampling_frequency=200,
         )
     )
     dataset = RumbleOnlyElephantData(config)

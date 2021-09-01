@@ -11,8 +11,8 @@ model:
   embedding_generator: "mean_c"
 
 training:
-  update_interval: 50
-  tsne_interval: 10000
+  update_interval: 10
+  tsne_interval: 2000
   log_output: true
   shuffle: true
   batch_size: 8

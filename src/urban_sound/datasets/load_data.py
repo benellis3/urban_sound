@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Tuple, Union, Any
-from functools import cached_property
+from functools import cached_property, lru_cache
 
 from torch.utils.data import Dataset
 from pandas import read_csv, concat, Timedelta
@@ -308,6 +308,11 @@ class RumbleOnlyElephantData(Dataset):
         )
         self.timedelta = config.dataset.timedelta
         self.is_labelled = config.dataset.is_labelled
+        # hard coded because reading the data alone takes a long time
+        # this means we cannot work out the max length in advanace
+        self.max_length = (
+            config.dataset.sampling_frequency * 2 * config.dataset.timedelta + 1
+        )
         self._construct_data()
 
     def __len__(self):
@@ -328,6 +333,7 @@ class RumbleOnlyElephantData(Dataset):
             UTCDateTime
         )
 
+    @lru_cache(maxsize=1500)
     def __getitem__(self, index):
         start = self._get_metadata_item(index, "start")
         end = self._get_metadata_item(index, "end")
@@ -335,10 +341,28 @@ class RumbleOnlyElephantData(Dataset):
         components = ["_e_", "_n_", "_z_"]
         streams = self.seismic_data_loader.get_seismic(station, start, end, components)
         stream = streams[0] + streams[1] + streams[2]
-        data = np.stack([t.data for t in stream.traces])
-        return th.tensor(data), th.tensor(0)
+        data = [t.data for t in stream.traces]
+        ret = []
+        for datum in data:
+            if datum.shape[0] != self.max_length:
+                new_data = np.zeros((datum.shape[0] + 1))
+                new_data[:-1] = datum
+                ret.append(new_data)
+            else:
+                ret.append(datum)
+        ret = np.stack(ret)
+        data = th.tensor(ret)
+        return data, th.tensor(0)
 
     def _get_metadata_item(self, index: int, column: int):
         return self.rumble_only_metadata.iloc[
             index, self.rumble_only_metadata.columns.get_loc(column)
         ]
+
+
+# TODO
+# make an elephant loader backend which loads the whole trace into memory and then slices chunks from it to improve speed
+# make a frontend which loads all the chunks through time 
+# build a classification pipeline
+# train resnet classifier
+

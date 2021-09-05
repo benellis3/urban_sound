@@ -32,7 +32,7 @@ class data_getter:
         self.seismic_path = seismic_path
         self.shumba_path = shumba_path
         self.camera_path = camera_path
-        self.station_component_cache = defaultdict(dict)
+        self.cache = defaultdict(dict)
 
     def _build_dataframe(self, station_dir):
         # Get csv with name of file, start and end times
@@ -51,7 +51,17 @@ class data_getter:
             )
         return inds
 
-    def _read_traces(self, df, inds, station_dir, start_window, end_window, components):
+    def _read_traces(
+        self,
+        df,
+        inds,
+        station_name,
+        station_dir,
+        start_window,
+        end_window,
+        components,
+        add_to_cache=False,
+    ):
         traces = []
         for ind in inds:
             file_name = df["name"].iloc[ind]
@@ -60,15 +70,18 @@ class data_getter:
             if any(comp in file_name for comp in components):
                 # Add trace to list
                 # print("reading %i"%(ind)) # suppressed output (michael)
-                traces.append(
-                    obspy.read(
-                        file_path,
-                        starttime=start_window,
-                        endtime=end_window,
-                        format="MSEED",
-                        dtype=np.float32,
-                    )
+                trace = obspy.read(
+                    file_path,
+                    starttime=start_window,
+                    endtime=end_window,
+                    format="MSEED",
+                    dtype=np.float32,
                 )
+                if add_to_cache:
+                    component = [comp for comp in components if comp in file_name]
+                    assert len(component) == 1, "Cannot have a file with > 1 component"
+                    self.cache[station_name][ind] = (trace, component[0])
+                traces.append(trace)
 
         return traces
 
@@ -78,10 +91,25 @@ class data_getter:
 
         station_dir = os.path.join(self.seismic_path, station_name)
         df = self._build_dataframe(station_dir)
-        inds = self._get_inds(self, df, start_window, end_window)
+        inds = self._get_inds(df, start_window, end_window)
         return self._read_traces(
-            df, inds, station_dir, start_window, end_window, components
+            df, inds, station_name, station_dir, start_window, end_window, components
         )
+
+    def _read_from_cache(
+        self, station_name, inds, start_window, end_window, components
+    ):
+
+        component_streams = [
+            self.cache[station_name][ind]
+            for ind in inds
+            if ind in self.cache[station_name]
+        ]
+        return [
+            s.slice(starttime=start_window, endtime=end_window)
+            for s, component in component_streams
+            if component in components
+        ]
 
     def get_seismic_cached(
         self,
@@ -101,8 +129,26 @@ class data_getter:
         """
         station_dir = os.path.join(self.seismic_path, station_name)
         df = self._build_dataframe(station_dir)
-        inds = self._get_inds(self, df, start_window, end_window)
-        full_trace = self._read_traces(df, inds, station_dir, None, None, components)
+        inds = self._get_inds(df, start_window, end_window)
+        if station_name in self.cache and all(
+            ind in self.cache[station_name] for ind in inds
+        ):
+            return self._read_from_cache(
+                station_name, inds, start_window, end_window, components
+            )
+        self._read_traces(
+            df,
+            inds,
+            station_name,
+            station_dir,
+            None,
+            None,
+            components,
+            add_to_cache=True,
+        )
+        return self._read_from_cache(
+            station_name, inds, start_window, end_window, components
+        )
 
     def trim_trace(self, trace, start_window, end_window):
         trcp = trace.copy()

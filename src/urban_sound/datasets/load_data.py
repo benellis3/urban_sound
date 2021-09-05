@@ -308,6 +308,14 @@ class RumbleOnlyElephantData(Dataset):
         )
         self.timedelta = config.dataset.timedelta
         self.is_labelled = config.dataset.is_labelled
+        self.single_station_mode = config.dataset.single_station_mode
+        self.station = getattr(config.dataset, "station", None)
+        if self.single_station_mode:
+            self.rumble_only_metadata = self.rumble_only_metadata.loc[
+                self.rumble_only_metadata["station"] == self.station
+            ]
+        self.station_labels = {"EEL11": 0, "ETA00": 1}
+        self.label_map = {0: "EEL11", 1: "ETA00"}
         # hard coded because reading the data alone takes a long time
         # this means we cannot work out the max length in advanace
         self.max_length = (
@@ -333,14 +341,17 @@ class RumbleOnlyElephantData(Dataset):
             UTCDateTime
         )
 
-    @lru_cache(maxsize=1500)
+    @lru_cache(maxsize=1520)
     def __getitem__(self, index):
         start = self._get_metadata_item(index, "start")
         end = self._get_metadata_item(index, "end")
         station = self._get_metadata_item(index, "station")
         components = ["_e_", "_n_", "_z_"]
-        streams = self.seismic_data_loader.get_seismic(station, start, end, components)
+        streams = self.seismic_data_loader.get_seismic_cached(
+            station, start, end, components
+        )
         stream = streams[0] + streams[1] + streams[2]
+        assert stream.traces
         data = [t.data for t in stream.traces]
         ret = []
         for datum in data:
@@ -352,7 +363,7 @@ class RumbleOnlyElephantData(Dataset):
                 ret.append(datum)
         ret = np.stack(ret)
         data = th.tensor(ret)
-        return data, th.tensor(0)
+        return data, th.tensor(self.station_labels[station])
 
     def _get_metadata_item(self, index: int, column: int):
         return self.rumble_only_metadata.iloc[
@@ -362,7 +373,22 @@ class RumbleOnlyElephantData(Dataset):
 
 # TODO
 # make an elephant loader backend which loads the whole trace into memory and then slices chunks from it to improve speed
-# make a frontend which loads all the chunks through time 
+# make a frontend which loads all the chunks through time
 # build a classification pipeline
 # train resnet classifier
 
+
+class EmbeddingsDataset(Dataset):
+    """DataLoader used fetch data from an input tensor"""
+
+    def __init__(
+        self, data: TensorType["batch", "size"], labels: TensorType["batch"] = None
+    ):
+        self.data = th.tensor(data).detach()
+        self.labels = th.tensor(labels).detach()
+
+    def __len__(self):
+        return self.data.size(0)
+
+    def __getitem__(self, index: int):
+        return self.data[index], self.labels[index]

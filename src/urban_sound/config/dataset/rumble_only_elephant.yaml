@@ -1,6 +1,8 @@
 timedelta: 5
-is_labelled: False
+is_labelled: True
 directory: "data/elephants"
 name: "rumble_only_elephant"
+single_station_mode: False
 sampling_frequency: 200
 channels: ???
+num_classes: 2

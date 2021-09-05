@@ -6,3 +6,4 @@ is_labelled: True
 is_pre_sliced: True
 grace_period: 0.25
 sample_rate: 16000
+num_classes: 10

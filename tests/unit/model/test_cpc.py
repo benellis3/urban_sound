@@ -34,7 +34,7 @@ def test_cnn_encoder_shape(normal_data):
     batch_size = normal_data.size(0)
     channels = normal_data.size(1)
     seq_len = normal_data.size(2)
-    encoder = CNNEncoder(z_size, channels)
+    encoder = CNNEncoder(z_size, channels, "cnn_tiny")
     output = encoder(normal_data)
     assert output.shape == (
         batch_size,
@@ -44,7 +44,7 @@ def test_cnn_encoder_shape(normal_data):
 
 
 def test_encoder_downsample():
-    encoder = CNNEncoder(10, 5)
+    encoder = CNNEncoder(10, 5, "cnn_large")
     assert encoder.downsample_factor == 160
 
 
@@ -65,7 +65,7 @@ def test_negative_sample_selector():
     look_ahead = 3
     data = th.arange(batch_size * z_size * T)
     data = data.reshape(batch_size, z_size, T)
-    config = Mock(look_ahead=look_ahead, N=N)
+    config = Mock(model=Mock(look_ahead=look_ahead, N=N))
     negative_sample_selector = RandomNegativeSampleSelector(config)
     idx_0 = th.zeros((batch_size, look_ahead, N - 1), dtype=int)
     idx_1 = [th.zeros((look_ahead, N - 1), dtype=int) for _ in range(batch_size)]
@@ -102,12 +102,15 @@ def test_cpc_shape(normal_data):
     arencoder = Mock(side_effect=_arencoder)
     config = Mock(
         device="cpu",
-        z_size=z_size,
-        c_size=c_size,
-        N=N,
-        look_ahead=look_ahead,
-        negative_sample_selector="random",
-        look_ahead_layer="linear",
+        model=Mock(
+            z_size=z_size,
+            c_size=c_size,
+            N=N,
+            look_ahead=look_ahead,
+            negative_sample_selector="random",
+            look_ahead_layer="linear",
+            embedding_generator="mean_c",
+        ),
     )
 
     # patch the encoder and decoder
@@ -169,12 +172,15 @@ def test_cpc(z_t, c_t, negative_samples, pos, neg):
     negative_selector = Mock(side_effect=neg_sample_func)
     config = Mock(
         device="cpu",
-        z_size=z_size,
-        c_size=c_size,
-        N=N,
-        look_ahead=look_ahead,
-        negative_sample_selector="random",
-        look_ahead_layer="linear",
+        model=Mock(
+            z_size=z_size,
+            c_size=c_size,
+            N=N,
+            look_ahead=look_ahead,
+            negative_sample_selector="random",
+            look_ahead_layer="linear",
+            embedding_generator="mean_c"
+        )
     )
     with patch(f"{MUT}.get_encoder", return_value=Mock(return_value=encoder)), patch(
         f"{MUT}.get_arencoder", return_value=Mock(return_value=ar_encoder)
@@ -194,12 +200,15 @@ def test_cpc(z_t, c_t, negative_samples, pos, neg):
 def test_find_seq_lens():
     # check that the randint calls are made correctly
     config = Mock(
-        z_size=10,
-        c_size=10,
-        N=5,
-        look_ahead=1,
-        negative_sample_selector="random",
-        look_ahead_layer="linear",
+        model=Mock(
+            z_size=10,
+            c_size=10,
+            N=5,
+            look_ahead=1,
+            negative_sample_selector="random",
+            look_ahead_layer="linear",
+            embedding_generator="mean_c"
+        )
     )
 
     batch = th.tensor(

@@ -1,4 +1,4 @@
-n_neighbours: 30
+n_neighbours: 15
 min_dist: 0.2
-n_components: 3
+n_components: 2
 name: "umap"

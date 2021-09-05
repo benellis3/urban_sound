@@ -1,16 +1,18 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Tuple, Union, Any
-from functools import cached_property
+from functools import cached_property, lru_cache
 
 from torch.utils.data import Dataset
-from pandas import read_csv, concat
+from pandas import read_csv, concat, Timedelta
 from torchaudio import info, load
 from torchaudio.sox_effects import apply_effects_tensor
 from torchtyping import TensorType, patch_typeguard
 import torch as th
 import numpy as np
 from typeguard import typechecked
+from urban_sound.datasets.kenya_data_getter import data_getter
+from obspy.core.utcdatetime import UTCDateTime
 
 from urban_sound.datasets.line_sweep import remove_overlap
 
@@ -289,3 +291,104 @@ class Urban8KDataset(AudioDataset, Dataset):
     def _get_audio_path(self, index: int) -> Path:
         fold = f"fold{self._get_metadata_item(index, 'fold')}"
         return self.dir / fold / self._get_metadata_item(index, "slice_file_name")
+
+
+class RumbleOnlyElephantData(Dataset):
+    def __init__(self, config, transform=None):
+        root_dir = _get_root_dir()
+        self.rumble_only_metadata = read_csv(
+            root_dir / config.dataset.directory / "metadata.csv", parse_dates=["events"]
+        )
+        self.rumble_only_metadata = self.rumble_only_metadata.loc[
+            self.rumble_only_metadata["rumble"] == 1
+        ]
+        self.transform = transform
+        self.seismic_data_loader = data_getter(
+            seismic_path=root_dir / config.dataset.directory
+        )
+        self.timedelta = config.dataset.timedelta
+        self.is_labelled = config.dataset.is_labelled
+        self.single_station_mode = config.dataset.single_station_mode
+        self.station = getattr(config.dataset, "station", None)
+        if self.single_station_mode:
+            self.rumble_only_metadata = self.rumble_only_metadata.loc[
+                self.rumble_only_metadata["station"] == self.station
+            ]
+        self.station_labels = {"EEL11": 0, "ETA00": 1}
+        self.label_map = {0: "EEL11", 1: "ETA00"}
+        # hard coded because reading the data alone takes a long time
+        # this means we cannot work out the max length in advanace
+        self.max_length = (
+            config.dataset.sampling_frequency * 2 * config.dataset.timedelta + 1
+        )
+        self._construct_data()
+
+    def __len__(self):
+        return len(self.rumble_only_metadata)
+
+    def _construct_data(self):
+        # read in the rumble data from the csv file
+        self.rumble_only_metadata["start"] = self.rumble_only_metadata[
+            "events"
+        ] - Timedelta(seconds=self.timedelta)
+        self.rumble_only_metadata["start"] = self.rumble_only_metadata["start"].apply(
+            UTCDateTime
+        )
+        self.rumble_only_metadata["end"] = self.rumble_only_metadata[
+            "events"
+        ] + Timedelta(seconds=self.timedelta)
+        self.rumble_only_metadata["end"] = self.rumble_only_metadata["end"].apply(
+            UTCDateTime
+        )
+
+    @lru_cache(maxsize=1520)
+    def __getitem__(self, index):
+        start = self._get_metadata_item(index, "start")
+        end = self._get_metadata_item(index, "end")
+        station = self._get_metadata_item(index, "station")
+        components = ["_e_", "_n_", "_z_"]
+        streams = self.seismic_data_loader.get_seismic_cached(
+            station, start, end, components
+        )
+        stream = streams[0] + streams[1] + streams[2]
+        assert stream.traces
+        data = [t.data for t in stream.traces]
+        ret = []
+        for datum in data:
+            if datum.shape[0] != self.max_length:
+                new_data = np.zeros((datum.shape[0] + 1))
+                new_data[:-1] = datum
+                ret.append(new_data)
+            else:
+                ret.append(datum)
+        ret = np.stack(ret)
+        data = th.tensor(ret)
+        return data, th.tensor(self.station_labels[station])
+
+    def _get_metadata_item(self, index: int, column: int):
+        return self.rumble_only_metadata.iloc[
+            index, self.rumble_only_metadata.columns.get_loc(column)
+        ]
+
+
+# TODO
+# make an elephant loader backend which loads the whole trace into memory and then slices chunks from it to improve speed
+# make a frontend which loads all the chunks through time
+# build a classification pipeline
+# train resnet classifier
+
+
+class EmbeddingsDataset(Dataset):
+    """DataLoader used fetch data from an input tensor"""
+
+    def __init__(
+        self, data: TensorType["batch", "size"], labels: TensorType["batch"] = None
+    ):
+        self.data = th.tensor(data).detach()
+        self.labels = th.tensor(labels).detach()
+
+    def __len__(self):
+        return self.data.size(0)
+
+    def __getitem__(self, index: int):
+        return self.data[index], self.labels[index]

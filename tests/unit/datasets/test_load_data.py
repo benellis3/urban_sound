@@ -1,7 +1,14 @@
 import pathlib
 from unittest.mock import Mock, patch
-from urban_sound.datasets.load_data import BirdDataset, Urban8KDataset
+from urban_sound.datasets.load_data import (
+    BirdDataset,
+    EmbeddingsDataset,
+    RumbleOnlyElephantData,
+    Urban8KDataset,
+)
+from urban_sound.datasets import get_dataset
 from pandas import DataFrame
+import torch as th
 
 
 def get_dataset_path(key):
@@ -12,6 +19,11 @@ def get_dataset_path(key):
     elif key == "bird_data":
         audio_path = dataset_path / "Recordings"
         metadata_path = dataset_path / "Annotation_Files"
+    elif key == "elephants":
+        audio_path = dataset_path
+        metadata_path = dataset_path / "metadata.csv"
+    else:
+        raise KeyError(f"{key} not recognised as dataset type")
     return audio_path, metadata_path
 
 
@@ -76,6 +88,24 @@ def test_bird_dataset():
     assert dataset[1][1] == 1
 
 
+def test_elephant_dataset():
+    audio_path, _ = get_dataset_path("elephants")
+    config = Mock(
+        dataset=Mock(
+            timedelta=5,
+            directory=audio_path,
+            is_labelled=False,
+            name="rumble_only_elephant",
+            sampling_frequency=200,
+        )
+    )
+    dataset = RumbleOnlyElephantData(config)
+    data, _ = dataset[0]
+    assert data.shape == (3, 2001)
+    data, _ = dataset[300]
+    assert data.shape == (3, 2001)
+
+
 def test_clean_polyphony():
     df = {
         "start": [0.0, 0.6, 0.3, 0.8, 0.9, 1.5, 2.5],
@@ -96,3 +126,15 @@ def test_clean_polyphony():
         dataset = BirdDataset(config)
         dataset._clean_polyphony()
         assert dataset.metadata.reset_index(drop=True).equals(DataFrame(out))
+
+
+def test_embeddings_dataset():
+    zs = th.zeros((100, 5))
+    labels = th.zeros((100,))
+    dataset = EmbeddingsDataset(zs, labels)
+    z, label = dataset[0]
+
+    assert th.all(z == th.zeros((5,)))
+    assert label == 0
+
+    assert len(dataset) == 100

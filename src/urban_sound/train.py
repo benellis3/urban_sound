@@ -2,6 +2,7 @@ from omegaconf.dictconfig import DictConfig
 from hydra.utils import to_absolute_path
 from torch.profiler.profiler import tensorboard_trace_handler
 from torch.utils.tensorboard.writer import SummaryWriter
+from urban_sound.evaluate import evaluate
 from urban_sound.logging.log import get_summary_writer, log_tsne
 from urban_sound.model.cpc import CPC, Scores
 from torch.utils.data import DataLoader
@@ -81,7 +82,9 @@ class Runner:
                     self.model.state_dict(),
                     Path(os.getcwd()) / fname,
                 )
-                self.generate_tsne_embeddings()
+                embeddings, labels = self.generate_tsne_embeddings()
+                if self.config.dataset.is_labelled:
+                    evaluate(self.config, embeddings, labels, self.t)
                 self.model.train()
 
     def train(self) -> None:
@@ -121,6 +124,7 @@ class Runner:
             log_tsne(
                 embeddings, self.config, self.t, display=display, label_map=label_map
             )
+        return embeddings, all_labels
 
     def _generate_tsne_embeddings(self) -> TensorType["N", "z_size"]:
         if self.config.embeddings.load_embeddings:
@@ -140,8 +144,10 @@ class Runner:
             embeddings = th.cat(embeddings).cpu()
             labels = th.cat(labels).unsqueeze(1).cpu().long()
             if self.config.embeddings.save_embeddings:
-                th.save(Path(os.getcwd()) / f"embeddings_{self.config.tag}.pt")
-                th.save(Path(os.getcwd()) / f"labels_{self.config.tag}.pt")
+                th.save(
+                    embeddings, Path(os.getcwd()) / f"embeddings_{self.config.tag}.pt"
+                )
+                th.save(labels, Path(os.getcwd()) / f"labels_{self.config.tag}.pt")
             return (
                 embeddings.numpy(),
                 labels.numpy(),

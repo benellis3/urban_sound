@@ -5,6 +5,7 @@ __pycache__/
 
 # Data
 data/
+tests/unit/resources
 *.gz
 *.zip
 

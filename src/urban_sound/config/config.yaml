@@ -2,7 +2,7 @@ device: ???
 model:
   z_size: 512
   c_size: 256
-  encoder: "cnn_large"
+  encoder: "cnn_small"
   arencoder: "gru"
   look_ahead_layer: "linear"
   look_ahead: 12
@@ -11,12 +11,21 @@ model:
   embedding_generator: "mean_c"
 
 training:
-  update_interval: 50
-  tsne_interval: 10000
+  update_interval: 10
+  tsne_interval: 2000
   log_output: true
   shuffle: true
   batch_size: 8
   epochs: 100
+
+eval:
+  optim_name: "RMSprop"
+  lr: 0.001
+  train_split: 0.8
+  train_batch_size: 64
+  test_batch_size: 128
+  epochs: 20
+  repeats: 20
 
 saved_model: null
 generate_tsne_only: false

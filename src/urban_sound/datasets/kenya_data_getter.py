@@ -1,5 +1,8 @@
+from collections import defaultdict
+from typing import List
 import numpy as np
 import obspy
+from obspy.core.stream import Stream
 from obspy.core.utcdatetime import UTCDateTime
 import os
 import pandas as pd
@@ -29,16 +32,16 @@ class data_getter:
         self.seismic_path = seismic_path
         self.shumba_path = shumba_path
         self.camera_path = camera_path
+        self.cache = defaultdict(dict)
 
-    def get_seismic(self, station_name, start_window, end_window, components):
-        """Returns list of obspy traces of seismic data from station_name, from start_window
-        to end_window, for selected components"""
-
-        station_dir = os.path.join(self.seismic_path, station_name)
+    def _build_dataframe(self, station_dir):
         # Get csv with name of file, start and end times
-        df = pd.read_csv(os.path.join(station_dir, "files_times_split.csv"))
+        df = pd.read_csv(os.path.join(station_dir, "files_times.csv"))
         df["start"] = [UTCDateTime(t) for t in df["start"]]
         df["end"] = [UTCDateTime(t) for t in df["end"]]
+        return df
+
+    def _get_inds(self, df, start_window, end_window):
         inds = df[
             (df["start"] <= start_window) & (df["end"] >= end_window)
         ].index.tolist()
@@ -46,8 +49,19 @@ class data_getter:
             raise ValueError(
                 "The window you requested is out of range, or is spread over two files, which not implemented yet."
             )
-        # print(inds) # suppressed output (michael)
+        return inds
 
+    def _read_traces(
+        self,
+        df,
+        inds,
+        station_name,
+        station_dir,
+        start_window,
+        end_window,
+        components,
+        add_to_cache=False,
+    ):
         traces = []
         for ind in inds:
             file_name = df["name"].iloc[ind]
@@ -56,17 +70,85 @@ class data_getter:
             if any(comp in file_name for comp in components):
                 # Add trace to list
                 # print("reading %i"%(ind)) # suppressed output (michael)
-                traces.append(
-                    obspy.read(
-                        file_path,
-                        starttime=start_window,
-                        endtime=end_window,
-                        format="MSEED",
-                        dtype=np.float32,
-                    )
+                trace = obspy.read(
+                    file_path,
+                    starttime=start_window,
+                    endtime=end_window,
+                    format="MSEED",
+                    dtype=np.float32,
                 )
+                if add_to_cache:
+                    component = [comp for comp in components if comp in file_name]
+                    assert len(component) == 1, "Cannot have a file with > 1 component"
+                    self.cache[station_name][ind] = (trace, component[0])
+                traces.append(trace)
 
         return traces
+
+    def get_seismic(self, station_name, start_window, end_window, components):
+        """Returns list of obspy traces of seismic data from station_name, from start_window
+        to end_window, for selected components"""
+
+        station_dir = os.path.join(self.seismic_path, station_name)
+        df = self._build_dataframe(station_dir)
+        inds = self._get_inds(df, start_window, end_window)
+        return self._read_traces(
+            df, inds, station_name, station_dir, start_window, end_window, components
+        )
+
+    def _read_from_cache(
+        self, station_name, inds, start_window, end_window, components
+    ):
+
+        component_streams = [
+            self.cache[station_name][ind]
+            for ind in inds
+            if ind in self.cache[station_name]
+        ]
+        return [
+            s.slice(starttime=start_window, endtime=end_window)
+            for s, component in component_streams
+            if component in components
+        ]
+
+    def get_seismic_cached(
+        self,
+        station_name: str,
+        start_window: UTCDateTime,
+        end_window: UTCDateTime,
+        components: List[str],
+    ) -> List[Stream]:
+        """This returns the same results as get_seismic, but loads the entire file into memory at once and caches it instead of
+        loading the slice of the file each time.
+
+        Args:
+            station_name (str): Name of the seismic station
+            start_window (UTCDateTime): Start time to extract
+            end_window (UTCDateTime): End time to extract
+            components (List[str]): the seismic components to extract
+        """
+        station_dir = os.path.join(self.seismic_path, station_name)
+        df = self._build_dataframe(station_dir)
+        inds = self._get_inds(df, start_window, end_window)
+        if station_name in self.cache and all(
+            ind in self.cache[station_name] for ind in inds
+        ):
+            return self._read_from_cache(
+                station_name, inds, start_window, end_window, components
+            )
+        self._read_traces(
+            df,
+            inds,
+            station_name,
+            station_dir,
+            None,
+            None,
+            components,
+            add_to_cache=True,
+        )
+        return self._read_from_cache(
+            station_name, inds, start_window, end_window, components
+        )
 
     def trim_trace(self, trace, start_window, end_window):
         trcp = trace.copy()

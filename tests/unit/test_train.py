@@ -30,7 +30,9 @@ def test_train():
     model = Mock()
     optimiser = Mock()
     loss = Mock()
-    config = Mock(log_output=False)
+    config = Mock(
+        log_output=False, training=Mock(update_interval=100, tsne_interval=1000)
+    )
     # want to verify call order among the model, the optimiser and the loss
     with patch("urban_sound.train.compute_cpc_loss", return_value=loss):
         runner = Runner(model, [(Mock(), Mock())], optimiser, config)

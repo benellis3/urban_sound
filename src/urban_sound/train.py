@@ -99,7 +99,7 @@ class Runner:
                     warmup=self.config.profiler.warmup,
                     active=self.config.profiler.active,
                 ),
-                on_trace_ready=tensorboard_trace_handler,
+                on_trace_ready=tensorboard_trace_handler(os.getcwd()),
                 activities=activities,
             ) as profiler:
                 self._train_loop(iter, profiler=profiler)

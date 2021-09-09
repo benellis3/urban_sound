@@ -2,6 +2,8 @@ import pathlib
 from unittest.mock import Mock, patch
 from urban_sound.datasets.load_data import (
     BirdDataset,
+    ContinuousRumbleData,
+    ContinuousRumbleImageData,
     EmbeddingsDataset,
     RumbleOnlyElephantData,
     Urban8KDataset,
@@ -97,6 +99,8 @@ def test_elephant_dataset():
             is_labelled=False,
             name="rumble_only_elephant",
             sampling_frequency=200,
+            single_station_mode=False,
+            station=None,
         )
     )
     dataset = RumbleOnlyElephantData(config)
@@ -104,6 +108,47 @@ def test_elephant_dataset():
     assert data.shape == (3, 2001)
     data, _ = dataset[300]
     assert data.shape == (3, 2001)
+
+
+def test_continuous_elephant_dataset():
+    audio_path, _ = get_dataset_path("elephants")
+    config = Mock(
+        dataset=Mock(
+            timedelta=5,
+            directory=audio_path,
+            is_labelled=True,
+            name="continuous_elephant",
+            sampling_frequency=200,
+            stations=["EEL11"],
+            grace_period=60,
+        )
+    )
+    dataset = ContinuousRumbleData(config)
+    data, label = dataset[0]
+    assert data.shape == (3, 2001)
+    assert label == 0
+
+
+def test_continuous_image_elephant_dataset():
+    audio_path, _ = get_dataset_path("elephants")
+    config = Mock(
+        dataset=Mock(
+            timedelta=5,
+            directory=audio_path,
+            is_labelled=True,
+            name="continuous_image_elephant",
+            sampling_frequency=200,
+            stations=["EEL11"],
+            grace_period=60,
+        )
+    )
+    dataset = ContinuousRumbleImageData(config)
+    data, label = dataset[0]
+    assert data.shape == (128, 128)
+    assert label == 0
+    data, label = dataset[51]
+    assert data.shape == (128, 128)
+    assert label == 1
 
 
 def test_clean_polyphony():

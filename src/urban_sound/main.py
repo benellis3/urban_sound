@@ -3,6 +3,7 @@ from torch.optim.optimizer import Optimizer
 from torch.utils.data import DataLoader
 from torch import load, optim, cuda, device
 import logging
+from multiprocessing import set_start_method
 import hydra
 from omegaconf import DictConfig
 from torch.utils.data.dataset import Dataset
@@ -21,6 +22,10 @@ def _make_optimiser(model, config: DictConfig) -> Optimizer:
 
 def _add_device_to_config(config: DictConfig) -> None:
     config.device = "cuda" if cuda.is_available() else "cpu"
+
+
+def _set_multiprocessing_start_method() -> None:
+    set_start_method("spawn")
 
 
 def _add_number_channels_to_config(dataset: Dataset, config: DictConfig) -> None:
@@ -42,8 +47,10 @@ def close_summary_writer() -> None:
 
 @hydra.main(config_path="config", config_name="config")
 def main(config: DictConfig) -> None:
-    dataset = get_dataset(config)
     _add_device_to_config(config)
+    if config.device == "cuda":
+        _set_multiprocessing_start_method()
+    dataset = get_dataset(config)
     _add_number_channels_to_config(dataset, config)
     dataloader = DataLoader(
         dataset, batch_size=config.training.batch_size, shuffle=config.training.shuffle

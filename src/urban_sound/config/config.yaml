@@ -10,6 +10,7 @@ model:
   negative_sample_selector: "random"
   embedding_generator: "mean_c"
 
+
 training:
   update_interval: 10
   tsne_interval: 2000

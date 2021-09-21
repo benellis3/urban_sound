@@ -228,7 +228,14 @@ class data_getter:
 
 
 def generate_image(
-    station, time, timewindow=10, fmin=10, fmax=50, resize=False, size=(128, 128)
+    dg: data_getter,
+    station,
+    time,
+    timewindow=10,
+    fmin=10,
+    fmax=50,
+    resize=False,
+    size=(224, 224),
 ):
     ##some settings for generating seismic spectrograms
     spect_seis = {}
@@ -238,26 +245,63 @@ def generate_image(
     spect_seis["nperseg"] = 199
     spect_seis["fft_resolution"] = spect_seis["NFFT"]
     spect_seis["fft_stride"] = spect_seis["NFFT"] - spect_seis["noverlap"]
+    timestamp = obspy.UTCDateTime(time)
+    start = timestamp - (timewindow / 2)
+    end = timestamp + (timewindow / 2)
     return _generate_image(
+        dg=dg,
         spect_seis=spect_seis,
         station=station,
-        time=time,
-        timewindow=timewindow,
+        start=start,
+        end=end,
         fmin=fmin,
         fmax=fmax,
-        resize=resize,
+        resize_image=resize,
+        size=size,
+    )
+
+
+def generate_image_by_start_end(
+    dg: data_getter,
+    station,
+    start,
+    end,
+    fmin=10,
+    fmax=50,
+    resize=False,
+    size=(224, 224),
+):
+    spect_seis = {}
+    spect_seis["fs"] = 200
+    spect_seis["NFFT"] = 400
+    spect_seis["noverlap"] = 198
+    spect_seis["nperseg"] = 199
+    spect_seis["frequency_resolution"] = 2
+    spect_seis["time_resolution"] = 0.005
+    spect_seis["fft_resolution"] = spect_seis["NFFT"]
+    spect_seis["fft_stride"] = spect_seis["NFFT"] - spect_seis["noverlap"]
+    return _generate_image(
+        dg=dg,
+        spect_seis=spect_seis,
+        station=station,
+        start=start,
+        end=end,
+        fmin=fmin,
+        fmax=fmax,
+        resize_image=resize,
         size=size,
     )
 
 
 def _generate_image(
+    dg: data_getter,
     spect_seis,
     station,
-    time,
-    timewindow=10,
+    start,
+    end,
     fmin=10,
     fmax=50,
-    resize=False,
+    resize_image=False,
     size=(128, 128),
 ):
     """
@@ -279,23 +323,16 @@ def _generate_image(
 
     """
 
-    # define start and end time of the signal
-    timestamp = obspy.UTCDateTime(time)
-    start = timestamp - (timewindow / 2)
-    end = timestamp + (timewindow / 2)
-    # load all three seismic components
-
-    dg = data_getter(camera_path=None)
-    seis = dg.get_seismic(
+    seis = dg.get_seismic_cached(
         station_name=station, start_window=start, end_window=end, components=["_e_"]
     )[0]
     seis.append(
-        dg.get_seismic(
+        dg.get_seismic_cached(
             station_name=station, start_window=start, end_window=end, components=["_n_"]
         )[0].traces[0]
     )
     seis.append(
-        dg.get_seismic(
+        dg.get_seismic_cached(
             station_name=station, start_window=start, end_window=end, components=["_z_"]
         )[0].traces[0]
     )
@@ -330,7 +367,7 @@ def _generate_image(
     fullsignal = sum_of_spectra[int(fmin * 2) : int(fmax * 2), :]
 
     # resize image to size
-    if resize:
+    if resize_image:
         fullsignal = resize(fullsignal, size, anti_aliasing=True)
 
     return fullsignal

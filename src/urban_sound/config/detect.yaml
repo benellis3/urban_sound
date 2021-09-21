@@ -1,0 +1,22 @@
+detect:
+  optim_name: "RMSprop"
+  lr: 0.001
+  train_split: 0.8
+  train_batch_size: 16
+  test_batch_size: 16
+  epochs: 100
+  workers: 4
+  model_name: "resnet"
+  prefetch: 4
+  timeout: 0
+
+profiler:
+  profile: False
+  warmup: 1
+  active: 3
+  wait: 1
+
+device: ???
+
+defaults:
+  - dataset: "continuous_image_elephant"

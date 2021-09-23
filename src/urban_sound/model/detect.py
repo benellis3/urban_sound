@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch as th
-from torchvision.models import squeezenet1_1
+from torchvision.models import squeezenet1_1, resnet34
 
 
 class ResnetDetector(nn.Module):
@@ -9,8 +9,10 @@ class ResnetDetector(nn.Module):
         self.config = config
         self.device = self.config.device
         self.num_classes = self.config.dataset.num_classes
-        self.model = squeezenet1_1(
-            pretrained=False, num_classes=self.config.dataset.num_classes
+        self.model = (
+            squeezenet1_1(pretrained=False, num_classes=self.config.dataset.num_classes)
+            if self.config.detect.model_name == "squeezenet"
+            else resnet34(num_classes=self.config.dataset.num_classes)
         )
         self.model = self.model.to(self.device)
 
@@ -33,7 +35,11 @@ class SimpleDetector(nn.Module):
         return ret.to(self.device)
 
 
-DETECT_MODEL_REGISTRY = {"simple": SimpleDetector, "resnet": ResnetDetector}
+DETECT_MODEL_REGISTRY = {
+    "simple": SimpleDetector,
+    "resnet": ResnetDetector,
+    "squeezenet": ResnetDetector,
+}
 
 
 def get_model(config):

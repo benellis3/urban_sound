@@ -445,6 +445,10 @@ class ContinuousRumbleData(ElephantDataBase, Dataset):
             self.rumble_only_metadata["station"] == station
         ]
         for _, row in station_metadata.iterrows():
+            # FIXME This will only mark a rumble as being in a chunk if 
+            # its midpoint is in that chunk. It would be much cleaner to 
+            # label a chunk as containing a rumble if any part of a rumble
+            # is in that chunk.
             event = row["events"]
             self._find_rumbles(first_window, event)
             self._find_rumbles(second_window, event)
@@ -515,7 +519,12 @@ class ContinuousRumbleImageData(ContinuousRumbleData):
         if self.config.dataset.kenya_data:
             img = th.tensor(
                 generate_image_by_start_end(
-                    self.seismic_data_loader, station, start, end, resize=self.resize
+                    self.seismic_data_loader,
+                    station,
+                    start,
+                    end,
+                    resize=self.resize,
+                    cache=self.config.dataset.cache,
                 )
             )
         elif self.config.dataset.use_collate_fn:
@@ -580,6 +589,8 @@ class ElephantImageCollateFunction:
         return [data, labels]
 
     def _generate_image(self, data):
+        if self.config.dataset.spectra_on_gpu:
+            data = data.to(self.device)
         waveform = audio_F.highpass_biquad(
             data, self.config.dataset.sampling_frequency, self.fmin
         )

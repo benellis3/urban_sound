@@ -16,6 +16,8 @@ profiler:
   active: 3
   wait: 1
 
+stop_early: true
+
 device: ???
 
 defaults:

@@ -57,6 +57,8 @@ class EvalRunner:
             if profiler is not None:
                 profiler.step()
             self.t = self.t + 1
+            if self.config.stop_early and self.t > 1000:
+                return
 
     def train(self):
         self.model.train()

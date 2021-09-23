@@ -236,6 +236,7 @@ def generate_image(
     fmax=50,
     resize=False,
     size=(224, 224),
+    cache=True,
 ):
     ##some settings for generating seismic spectrograms
     spect_seis = {}
@@ -258,6 +259,7 @@ def generate_image(
         fmax=fmax,
         resize_image=resize,
         size=size,
+        cache=cache,
     )
 
 
@@ -270,6 +272,7 @@ def generate_image_by_start_end(
     fmax=50,
     resize=False,
     size=(224, 224),
+    cache=True,
 ):
     spect_seis = {}
     spect_seis["fs"] = 200
@@ -290,6 +293,7 @@ def generate_image_by_start_end(
         fmax=fmax,
         resize_image=resize,
         size=size,
+        cache=cache,
     )
 
 
@@ -303,6 +307,7 @@ def _generate_image(
     fmax=50,
     resize_image=False,
     size=(128, 128),
+    cache=True,
 ):
     """
     Generates spectrogram np array"
@@ -322,19 +327,19 @@ def _generate_image(
         if True, spectrograms are being "resized"
 
     """
-
-    seis = dg.get_seismic_cached(
+    f = dg.get_seismic_cached if cache else dg.get_seismic
+    seis = f(
         station_name=station, start_window=start, end_window=end, components=["_e_"]
     )[0]
     seis.append(
-        dg.get_seismic_cached(
-            station_name=station, start_window=start, end_window=end, components=["_n_"]
-        )[0].traces[0]
+        f(station_name=station, start_window=start, end_window=end, components=["_n_"])[
+            0
+        ].traces[0]
     )
     seis.append(
-        dg.get_seismic_cached(
-            station_name=station, start_window=start, end_window=end, components=["_z_"]
-        )[0].traces[0]
+        f(station_name=station, start_window=start, end_window=end, components=["_z_"])[
+            0
+        ].traces[0]
     )
     seis.filter("highpass", freq=fmin)
     seis.filter("lowpass", freq=fmax)

@@ -9,10 +9,12 @@ num_classes: 2
 resize: False
 size: 64
 kenya_data: False
+cache: True
 frequency_min: 10
 frequency_max: 50
 n_fft: 400
 use_collate_fn: True
+spectra_on_gpu: False
 hop_length: 1
 win_length: 199
 stations:
